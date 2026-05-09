@@ -5,6 +5,7 @@ public class UnitConfig : ScriptableObject
 {
     public string unitId;
     public string unitName;
+    public GameObject prefab;
     public int baseAttack = 10;
     public float baseSpeed = 5f;
     public int baseHealth = 100;

@@ -10,6 +10,7 @@ public class MapJsonData
     public int mapHeight;
     public int layerCount = 1;
     public List<MapCellData> cellDatas = new List<MapCellData>();
+    public List<MapUnitData> unitDatas = new List<MapUnitData>();
 
     public List<string> Validate(MapResourceConfig config)
     {
@@ -39,4 +40,13 @@ public class MapCellData
     public int y;
     public int layer;
     public string terrainId;
+}
+
+[Serializable]
+public class MapUnitData
+{
+    public int x;
+    public int y;
+    public int layer;
+    public string unitId;
 }

@@ -132,7 +132,7 @@ public static class MapPathfinding
         public float gCost;
         public float hCost;
         public Node parent;
-        public int heapIndex;
+        public int heapIndex { get; set; }
         public float fCost => gCost + hCost;
 
         public int CompareTo(Node other)
