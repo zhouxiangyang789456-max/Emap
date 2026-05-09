@@ -1,6 +1,7 @@
 using UnityEditor;
 using UnityEngine;
 using System.Collections.Generic;
+using System.IO;
 
 public class MapEditorWindow : EditorWindow
 {
@@ -11,6 +12,7 @@ public class MapEditorWindow : EditorWindow
     private int selectedTerrainId = 0;
     private EditMode editMode = EditMode.Brush;
     public MapJsonData mapData;
+    private string savePath = "Assets/map.json";
 
     public enum EditMode
     {
@@ -60,6 +62,20 @@ public class MapEditorWindow : EditorWindow
                 mapData = new MapJsonData { width = mapWidth, height = mapHeight, cells = new List<MapJsonData.TerrainCell>() };
             }
 
+            // JSON 保存/加载
+            GUILayout.Label("保存/加载", EditorStyles.boldLabel);
+            savePath = EditorGUILayout.TextField("文件路径", savePath);
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("保存"))
+            {
+                SaveMap();
+            }
+            if (GUILayout.Button("加载"))
+            {
+                LoadMap();
+            }
+            EditorGUILayout.EndHorizontal();
+
             // 地形资源列表编辑面板
             GUILayout.Label("地形资源列表", EditorStyles.boldLabel);
             if (GUILayout.Button("添加地形"))
@@ -85,6 +101,30 @@ public class MapEditorWindow : EditorWindow
         }
 
         EditorGUILayout.EndScrollView();
+    }
+
+    void SaveMap()
+    {
+        string json = JsonUtility.ToJson(mapData, true);
+        File.WriteAllText(savePath, json);
+        AssetDatabase.Refresh();
+        Debug.Log("地图已保存到 " + savePath);
+    }
+
+    void LoadMap()
+    {
+        if (File.Exists(savePath))
+        {
+            string json = File.ReadAllText(savePath);
+            mapData = JsonUtility.FromJson<MapJsonData>(json);
+            mapWidth = mapData.width;
+            mapHeight = mapData.height;
+            Debug.Log("地图已加载从 " + savePath);
+        }
+        else
+        {
+            Debug.LogError("文件不存在: " + savePath);
+        }
     }
 
     void AddTerrainType()
