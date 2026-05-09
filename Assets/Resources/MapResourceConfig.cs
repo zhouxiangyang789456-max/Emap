@@ -11,7 +11,23 @@ public class MapResourceConfig : ScriptableObject
         public bool canPass = true;
         public bool blockUnit = false;
         public Color color = Color.green;
-        // 自定义属性可以在这里添加
+
+        // 根据通行规则自动设置颜色
+        public void UpdateColor()
+        {
+            if (!canPass)
+            {
+                color = Color.red; // 阻挡
+            }
+            else if (blockUnit)
+            {
+                color = Color.yellow; // 单位阻挡
+            }
+            else
+            {
+                color = Color.green; // 可通过
+            }
+        }
     }
 
     public TerrainType[] terrainTypes;

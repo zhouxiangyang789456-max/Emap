@@ -88,8 +88,14 @@ public class MapEditorWindow : EditorWindow
                 EditorGUILayout.BeginHorizontal();
                 config.terrainTypes[i].id = EditorGUILayout.IntField("ID", config.terrainTypes[i].id);
                 config.terrainTypes[i].name = EditorGUILayout.TextField("名称", config.terrainTypes[i].name);
+                bool oldCanPass = config.terrainTypes[i].canPass;
+                bool oldBlockUnit = config.terrainTypes[i].blockUnit;
                 config.terrainTypes[i].canPass = EditorGUILayout.Toggle("可通过", config.terrainTypes[i].canPass);
                 config.terrainTypes[i].blockUnit = EditorGUILayout.Toggle("阻挡单位", config.terrainTypes[i].blockUnit);
+                if (oldCanPass != config.terrainTypes[i].canPass || oldBlockUnit != config.terrainTypes[i].blockUnit)
+                {
+                    config.terrainTypes[i].UpdateColor();
+                }
                 config.terrainTypes[i].color = EditorGUILayout.ColorField("颜色", config.terrainTypes[i].color);
                 if (GUILayout.Button("删除"))
                 {
