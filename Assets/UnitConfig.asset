@@ -12,8 +12,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 95e2c84e4ec612148adf1be6f71df177, type: 3}
   m_Name: UnitConfig
   m_EditorClassIdentifier: 
-  unitId: 
-  unitName: 
+  unitId: 1
+  unitName: 111
   prefab: {fileID: 0}
   baseAttack: 10
   baseSpeed: 5

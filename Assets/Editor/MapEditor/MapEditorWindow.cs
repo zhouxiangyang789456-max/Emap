@@ -1502,6 +1502,13 @@ public class MapEditorWindow : EditorWindow
         else
         {
             _scene2D?.Cleanup();
+            // 恢复 3D 透视相机
+            if (SceneView.lastActiveSceneView != null)
+            {
+                SceneView.lastActiveSceneView.in2DMode = false;
+                SceneView.lastActiveSceneView.orthographic = false;
+                SceneView.lastActiveSceneView.Repaint();
+            }
         }
         SceneView.RepaintAll();
     }
