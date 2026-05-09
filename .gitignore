@@ -1,0 +1,32 @@
+# Unity
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+
+# Visual Studio
+.vs/
+*.csproj
+*.sln
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Unity meta files (keep these for asset references)
+# *.meta is tracked by default
+
+# TextMeshPro (generated at import time)
+Assets/TextMesh*/
+
+# Asset store tools
+Assets/AssetStoreTools*
