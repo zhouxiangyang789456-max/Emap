@@ -8,6 +8,15 @@ public class MapEditorWindow : EditorWindow
     private int mapHeight = 10;
     private MapResourceConfig config;
     private Vector2 scrollPos;
+    private int selectedTerrainId = 0;
+    private EditMode editMode = EditMode.Brush;
+    public MapJsonData mapData;
+
+    public enum EditMode
+    {
+        Brush,
+        Eraser
+    }
 
     [MenuItem("地图编辑器/打开地图编辑器")]
     static void OpenWindow()
@@ -33,6 +42,24 @@ public class MapEditorWindow : EditorWindow
 
         if (config != null)
         {
+            // 编辑模式
+            GUILayout.Label("编辑模式", EditorStyles.boldLabel);
+            editMode = (EditMode)EditorGUILayout.EnumPopup("模式", editMode);
+
+            // 选择地形
+            string[] terrainNames = new string[config.terrainTypes.Length];
+            for (int i = 0; i < config.terrainTypes.Length; i++)
+            {
+                terrainNames[i] = config.terrainTypes[i].name;
+            }
+            selectedTerrainId = EditorGUILayout.Popup("选择地形", selectedTerrainId, terrainNames);
+
+            // 初始化地图数据
+            if (mapData == null || mapData.width != mapWidth || mapData.height != mapHeight)
+            {
+                mapData = new MapJsonData { width = mapWidth, height = mapHeight, cells = new List<MapJsonData.TerrainCell>() };
+            }
+
             // 地形资源列表编辑面板
             GUILayout.Label("地形资源列表", EditorStyles.boldLabel);
             if (GUILayout.Button("添加地形"))
