@@ -63,6 +63,17 @@ public class TerrainResource
     public string terrainName;
     public Sprite terrainSprite;
 
+    [Header("预制体")]
+    public GameObject prefab;
+
+    [Header("资源标签")]
+    public string resourceTag = "地形";
+
+    [Header("单位属性（标签为\"单位\"时有效）")]
+    public int unitAttack = 10;
+    public float unitSpeed = 5f;
+    public int unitHealth = 100;
+
     [Header("通行规则")]
     public DefaultTerrainType defaultType;
 

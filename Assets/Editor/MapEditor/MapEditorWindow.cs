@@ -93,6 +93,38 @@ public class MapEditorWindow : EditorWindow
     // ===== 滚动 =====
     private Vector2 _scrollPos;
 
+    private enum EditorTab { MapEdit, ResourceManage }
+    private EditorTab _currentTab = EditorTab.MapEdit;
+
+    private static readonly string[] PredefinedTags = { "地形", "单位", "建筑" };
+
+    private enum TileShape { Rectangle, Hexagon }
+
+    private struct TileSizePreset
+    {
+        public string label;
+        public int pixelWidth;
+        public int pixelHeight;
+    }
+
+    private static readonly TileSizePreset[] SquarePresets = new[]
+    {
+        new TileSizePreset { label = "32×32",   pixelWidth = 32,  pixelHeight = 32 },
+        new TileSizePreset { label = "64×64",   pixelWidth = 64,  pixelHeight = 64 },
+        new TileSizePreset { label = "128×128", pixelWidth = 128, pixelHeight = 128 },
+        new TileSizePreset { label = "256×256", pixelWidth = 256, pixelHeight = 256 },
+    };
+
+    private static readonly TileSizePreset[] HexPresets = new[]
+    {
+        new TileSizePreset { label = "64×74",   pixelWidth = 64,  pixelHeight = 74 },
+        new TileSizePreset { label = "128×148", pixelWidth = 128, pixelHeight = 148 },
+        new TileSizePreset { label = "256×296", pixelWidth = 256, pixelHeight = 296 },
+    };
+
+    private static float SquarePresetToCellSize(TileSizePreset p) => p.pixelWidth / 100f;
+    private static float HexPresetToRadius(TileSizePreset p) => p.pixelHeight / 200f;
+
     // ===== 地形列表折叠状态 =====
     private HashSet<int> _expandedTerrains = new HashSet<int>();
 
@@ -102,6 +134,15 @@ public class MapEditorWindow : EditorWindow
     private string _newTerrainName = "";
     private DefaultTerrainType _newTerrainType = DefaultTerrainType.Passable;
     private Sprite _newTerrainSprite;
+    private GameObject _newTerrainPrefab;
+    private TileShape _newTileShape = TileShape.Rectangle;
+    private int _newTileSizeIndex = 2;
+    private string _newResourceTag = "地形";
+    private string _customTagInput = "";
+    private bool _useCustomTag = false;
+    private int _newUnitAttack = 10;
+    private float _newUnitSpeed = 5f;
+    private int _newUnitHealth = 100;
 
     // ===== Undo 数据结构 =====
     private class UndoOperation
@@ -211,7 +252,7 @@ public class MapEditorWindow : EditorWindow
 
     private void OnGUI()
     {
-        GUILayout.Space(10);
+        GUILayout.Space(5);
         EditorGUILayout.LabelField("==== 地形地图编辑器 ====", EditorStyles.boldLabel);
 
         _config = EditorGUILayout.ObjectField("地形资源配置表", _config, typeof(MapResourceConfig), false) as MapResourceConfig;
@@ -221,72 +262,35 @@ public class MapEditorWindow : EditorWindow
             return;
         }
 
-        // 单位配置管理
-        EditorGUILayout.LabelField("单位配置管理", EditorStyles.boldLabel);
-        EditorGUILayout.HelpBox("每个 UnitConfig 资产代表一种敌人/怪物/NPC。创建多个即可配置多种单位。", MessageType.Info);
+        GUILayout.Space(4);
+        _currentTab = (EditorTab)GUILayout.Toolbar((int)_currentTab, new[] { "地图编辑", "资源管理" });
+        GUILayout.Space(6);
 
-        EditorGUILayout.BeginHorizontal();
-        if (GUILayout.Button("+ 创建新单位配置", GUILayout.Height(22)))
+        switch (_currentTab)
         {
-            string path = EditorUtility.SaveFilePanelInProject("创建单位配置", "UnitConfig", "asset", "选择保存位置");
-            if (!string.IsNullOrEmpty(path))
-            {
-                var newConfig = CreateInstance<UnitConfig>();
-                newConfig.unitId = System.IO.Path.GetFileNameWithoutExtension(path);
-                newConfig.unitName = newConfig.unitId;
-                AssetDatabase.CreateAsset(newConfig, path);
-                AssetDatabase.SaveAssets();
-                _unitConfigs.Add(newConfig);
-                _selectUnitIndex = _unitConfigs.Count - 1;
-            }
-        }
-        if (GUILayout.Button("扫描已存在的配置", GUILayout.Height(22)))
-        {
-            _unitConfigs.Clear();
-            _unitConfigs.AddRange(
-                AssetDatabase.FindAssets("t:UnitConfig")
-                    .Select(guid => AssetDatabase.LoadAssetAtPath<UnitConfig>(AssetDatabase.GUIDToAssetPath(guid)))
-                    .Where(c => c != null));
-        }
-        EditorGUILayout.EndHorizontal();
-
-        // 拖入区
-        EditorGUILayout.BeginHorizontal();
-        EditorGUILayout.LabelField("拖入配置", GUILayout.Width(80));
-        var newCfg = EditorGUILayout.ObjectField(null, typeof(UnitConfig), false) as UnitConfig;
-        if (newCfg != null && !_unitConfigs.Contains(newCfg))
-            _unitConfigs.Add(newCfg);
-        EditorGUILayout.EndHorizontal();
-
-        if (_unitConfigs.Count > 0)
-        {
-            EditorGUILayout.LabelField($"  已加载 {_unitConfigs.Count} 种单位：", EditorStyles.miniLabel);
-            // 横向排列显示所有单位
-            EditorGUILayout.BeginHorizontal();
-            for (int i = 0; i < _unitConfigs.Count; i++)
-            {
-                var uc = _unitConfigs[i];
-                if (uc == null) continue;
-                string btnLabel = $"{uc.unitName}\n({uc.unitId})";
-                if (i == _selectUnitIndex) GUI.backgroundColor = Color.cyan;
-                if (GUILayout.Button(btnLabel, GUILayout.Width(80), GUILayout.Height(36)))
-                    _selectUnitIndex = i;
-                GUI.backgroundColor = Color.white;
-            }
-            EditorGUILayout.EndHorizontal();
-        }
-        else
-        {
-            EditorGUILayout.HelpBox("尚未加载任何单位配置。请点击\"创建新单位配置\"或\"扫描\"加载。", MessageType.Warning);
+            case EditorTab.MapEdit:
+                DrawTab_MapEdit();
+                break;
+            case EditorTab.ResourceManage:
+                DrawTab_ResourceManage();
+                break;
         }
 
+        HandleShortcuts();
+    }
+
+    // ============================================================
+    //  Tab: 地图编辑
+    // ============================================================
+
+    private void DrawTab_MapEdit()
+    {
         DrawMapSetting();
         DrawDimensionToggle();
 
-        // 单位配置列表（对象层时需要）
-        if (!IsCurrentLayerTerrain && _unitConfigs.Count == 0)
+        if (!IsCurrentLayerTerrain && !_config.terrainResources.Any(t => t != null && t.resourceTag == "单位"))
         {
-            EditorGUILayout.HelpBox("请拖入 UnitConfig 资产以选择要放置的单位", MessageType.Warning);
+            EditorGUILayout.HelpBox("请先在「资源管理」页签中创建标签为\"单位\"的资源", MessageType.Warning);
         }
 
         DrawEditMode();
@@ -295,8 +299,15 @@ public class MapEditorWindow : EditorWindow
         else
             DrawUnitSelect();
         DrawOperateBtn();
+    }
+
+    // ============================================================
+    //  Tab: 资源管理
+    // ============================================================
+
+    private void DrawTab_ResourceManage()
+    {
         DrawTerrainConfigList();
-        HandleShortcuts();
     }
 
     // ============================================================
@@ -340,26 +351,22 @@ public class MapEditorWindow : EditorWindow
         EditorGUILayout.LabelField("快速预设", GUILayout.Width(60));
         if (_gridShape != GridShape.Square)
         {
-            float[] hexPresets = { 0.5f, 0.75f, 1.0f, 1.5f, 2.0f };
-            string[] hexLabels = { "0.5", "0.75", "1.0", "1.5", "2.0" };
-            for (int i = 0; i < hexPresets.Length; i++)
+            for (int i = 0; i < HexPresets.Length; i++)
             {
-                if (GUILayout.Button(hexLabels[i], GUILayout.Width(38), GUILayout.Height(18)))
+                if (GUILayout.Button(HexPresets[i].label, GUILayout.Width(68), GUILayout.Height(22)))
                 {
-                    _cellSize = hexPresets[i];
+                    _cellSize = HexPresetToRadius(HexPresets[i]);
                     OnDimensionChanged();
                 }
             }
         }
         else
         {
-            float[] presets = { 0.16f, 0.32f, 0.64f, 1f, 1.28f };
-            string[] presetLabels = { "16", "32", "64", "100", "128" };
-            for (int i = 0; i < presets.Length; i++)
+            for (int i = 0; i < SquarePresets.Length; i++)
             {
-                if (GUILayout.Button(presetLabels[i], GUILayout.Width(38), GUILayout.Height(18)))
+                if (GUILayout.Button(SquarePresets[i].label, GUILayout.Width(68), GUILayout.Height(22)))
                 {
-                    _cellSize = presets[i];
+                    _cellSize = SquarePresetToCellSize(SquarePresets[i]);
                     OnDimensionChanged();
                 }
             }
@@ -449,13 +456,12 @@ public class MapEditorWindow : EditorWindow
 
     private void DrawSpriteSizeReference()
     {
-        if (_config == null || _config.terrainResources.Count == 0) return;
-        if (_selectTerrainIndex >= _config.terrainResources.Count) return;
+        if (_config == null || _selectedTerrain == null) return;
 
-        var terrain = _config.terrainResources[_selectTerrainIndex];
-        if (terrain?.terrainSprite == null) return;
+        var terrainSprite = _selectedTerrain.terrainSprite;
+        if (terrainSprite == null) return;
 
-        Sprite sprite = terrain.terrainSprite;
+        Sprite sprite = terrainSprite;
         float ppu = sprite.pixelsPerUnit;
         float spriteW = sprite.rect.width;
         float spriteH = sprite.rect.height;
@@ -551,18 +557,21 @@ public class MapEditorWindow : EditorWindow
 
     private void DrawTerrainSelect()
     {
-        if (_config.terrainResources.Count == 0)
+        // 筛选非单位标签的地形资源
+        var terrainList = _config.terrainResources
+            .Where(t => t != null && t.resourceTag != "单位").ToList();
+        if (terrainList.Count == 0)
         {
-            EditorGUILayout.HelpBox("地形资源列表为空，请先添加地形", MessageType.Warning);
+            EditorGUILayout.HelpBox("没有可用的地形资源，请先在「资源管理」中创建。", MessageType.Warning);
             return;
         }
 
         // 过滤掉 null 的地形项
         var validList = new List<int>();
-        string[] names = new string[_config.terrainResources.Count];
-        for (int i = 0; i < _config.terrainResources.Count; i++)
+        string[] names = new string[terrainList.Count];
+        for (int i = 0; i < terrainList.Count; i++)
         {
-            var t = _config.terrainResources[i];
+            var t = terrainList[i];
             if (t == null)
             {
                 names[i] = $"(null 下标{i})";
@@ -571,7 +580,8 @@ public class MapEditorWindow : EditorWindow
             {
                 string idStr = string.IsNullOrEmpty(t.terrainId) ? "???" : t.terrainId;
                 string nameStr = string.IsNullOrEmpty(t.terrainName) ? "未命名" : t.terrainName;
-                names[i] = $"[{idStr}] {nameStr}";
+                string tagStr = string.IsNullOrEmpty(t.resourceTag) ? "" : $" [{t.resourceTag}]";
+                names[i] = $"[{idStr}] {nameStr}{tagStr}";
                 validList.Add(i);
             }
         }
@@ -579,22 +589,25 @@ public class MapEditorWindow : EditorWindow
         // 确保选中索引指向有效的 terrain
         if (validList.Count > 0 && !validList.Contains(_selectTerrainIndex))
             _selectTerrainIndex = validList[0];
-        _selectTerrainIndex = Mathf.Clamp(_selectTerrainIndex, 0, _config.terrainResources.Count - 1);
+        _selectTerrainIndex = Mathf.Clamp(_selectTerrainIndex, 0, terrainList.Count - 1);
 
         EditorGUILayout.LabelField("选择要绘制的地形", EditorStyles.boldLabel);
         _selectTerrainIndex = EditorGUILayout.Popup("选中地形", _selectTerrainIndex, names);
 
-        var sel = _config.terrainResources[_selectTerrainIndex];
-        if (sel != null)
+        if (_selectTerrainIndex < terrainList.Count)
         {
-            string passLabel = sel.defaultType switch
+            var sel = terrainList[_selectTerrainIndex];
+            if (sel != null)
             {
-                DefaultTerrainType.Passable => "可通行",
-                DefaultTerrainType.Impassable => "不可通行",
-                DefaultTerrainType.UnitImpassable => "单位不可通行",
-                _ => "未知"
-            };
-            EditorGUILayout.LabelField("当前选中", $"ID: {sel.terrainId} | {sel.terrainName} | 通行: {passLabel}");
+                string passLabel = sel.defaultType switch
+                {
+                    DefaultTerrainType.Passable => "可通行",
+                    DefaultTerrainType.Impassable => "不可通行",
+                    DefaultTerrainType.UnitImpassable => "单位不可通行",
+                    _ => "未知"
+                };
+                EditorGUILayout.LabelField("当前选中", $"ID: {sel.terrainId} | {sel.terrainName} | 标签: {sel.resourceTag} | 通行: {passLabel}");
+            }
         }
     }
 
@@ -604,22 +617,29 @@ public class MapEditorWindow : EditorWindow
 
     private void DrawUnitSelect()
     {
-        if (_unitConfigs.Count == 0) return;
+        // 从 TerrainResource 中筛选标签="单位"的资源
+        var unitResources = _config.terrainResources
+            .Where(t => t != null && t.resourceTag == "单位").ToList();
+        if (unitResources.Count == 0)
+        {
+            EditorGUILayout.HelpBox("没有标签为\"单位\"的资源。请在「资源管理」中创建。", MessageType.Warning);
+            return;
+        }
 
         EditorGUILayout.LabelField("选择要放置的单位", EditorStyles.boldLabel);
-        string[] names = new string[_unitConfigs.Count];
-        for (int i = 0; i < _unitConfigs.Count; i++)
+        string[] names = new string[unitResources.Count];
+        for (int i = 0; i < unitResources.Count; i++)
         {
-            var u = _unitConfigs[i];
-            names[i] = u != null ? $"[{u.unitId}] {u.unitName}" : $"<null 下标{i}>";
+            var u = unitResources[i];
+            names[i] = $"[{u.terrainId}] {u.terrainName}  ATK:{u.unitAttack} SPD:{u.unitSpeed} HP:{u.unitHealth}";
         }
-        _selectUnitIndex = Mathf.Clamp(_selectUnitIndex, 0, _unitConfigs.Count - 1);
+        _selectUnitIndex = Mathf.Clamp(_selectUnitIndex, 0, unitResources.Count - 1);
         _selectUnitIndex = EditorGUILayout.Popup("选中单位", _selectUnitIndex, names);
 
-        var sel = _unitConfigs[_selectUnitIndex];
+        var sel = unitResources[_selectUnitIndex];
         if (sel != null)
         {
-            EditorGUILayout.LabelField("当前选中", $"ID: {sel.unitId} | {sel.unitName}");
+            EditorGUILayout.LabelField("当前选中", $"ID: {sel.terrainId} | {sel.terrainName} | ATK:{sel.unitAttack} SPD:{sel.unitSpeed} HP:{sel.unitHealth}");
             if (sel.prefab != null)
                 EditorGUILayout.ObjectField("预制体", sel.prefab, typeof(GameObject), false);
             else
@@ -671,19 +691,100 @@ public class MapEditorWindow : EditorWindow
     private void DrawTerrainConfigList()
     {
         _scrollPos = EditorGUILayout.BeginScrollView(_scrollPos);
-        EditorGUILayout.LabelField("地形资源配置列表", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("资源配置列表", EditorStyles.boldLabel);
 
         // ========== 创建区域 ==========
         EditorGUILayout.BeginVertical("Box");
         if (!_showNewTerrainForm)
         {
-            if (GUILayout.Button("+ 创建新地形", GUILayout.Height(25)))
+            if (GUILayout.Button("+ 创建新资源", GUILayout.Height(25)))
                 _showNewTerrainForm = true;
         }
         else
         {
-            EditorGUILayout.LabelField("新建地形", EditorStyles.boldLabel);
-            _newTerrainId = EditorGUILayout.TextField("地形 ID（必填）", _newTerrainId);
+            EditorGUILayout.LabelField("新建资源", EditorStyles.boldLabel);
+
+            var newPrefab = EditorGUILayout.ObjectField("从预制体导入 (可选)", _newTerrainPrefab, typeof(GameObject), false) as GameObject;
+            if (newPrefab != _newTerrainPrefab)
+            {
+                _newTerrainPrefab = newPrefab;
+                if (_newTerrainPrefab != null)
+                {
+                    string prefabName = _newTerrainPrefab.name;
+                    _newTerrainId = prefabName.ToLower().Replace(" ", "_").Trim();
+                    _newTerrainName = prefabName;
+                    _newTerrainSprite = ExtractSpriteFromPrefab(_newTerrainPrefab);
+                    if (_newTerrainSprite == null)
+                        Debug.LogWarning($"[地图编辑器] 预制体 \"{prefabName}\" 没有 SpriteRenderer，请手动设置预览图标。");
+                }
+            }
+
+            // 资源标签
+            EditorGUILayout.LabelField("资源标签", EditorStyles.boldLabel);
+            EditorGUILayout.BeginHorizontal();
+            for (int i = 0; i < PredefinedTags.Length; i++)
+            {
+                bool selected = !_useCustomTag && _newResourceTag == PredefinedTags[i];
+                GUI.backgroundColor = selected ? Color.cyan : Color.white;
+                if (GUILayout.Button(PredefinedTags[i], GUILayout.Height(22)))
+                {
+                    _newResourceTag = PredefinedTags[i];
+                    _useCustomTag = false;
+                }
+                GUI.backgroundColor = Color.white;
+            }
+            if (GUILayout.Button(_useCustomTag ? "✓ 自定义" : "+ 自定义", GUILayout.Width(80), GUILayout.Height(22)))
+            {
+                _useCustomTag = !_useCustomTag;
+                if (_useCustomTag) _newResourceTag = _customTagInput;
+                else _newResourceTag = "地形";
+            }
+            EditorGUILayout.EndHorizontal();
+
+            if (_useCustomTag)
+            {
+                _customTagInput = EditorGUILayout.TextField("自定义标签", _customTagInput);
+                if (!string.IsNullOrWhiteSpace(_customTagInput))
+                    _newResourceTag = _customTagInput.Trim();
+            }
+
+            // 瓦片形状 + 大小预设
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("瓦片形状", GUILayout.Width(70));
+            _newTileShape = (TileShape)EditorGUILayout.EnumPopup(_newTileShape);
+            EditorGUILayout.EndHorizontal();
+
+            var presets = _newTileShape == TileShape.Hexagon ? HexPresets : SquarePresets;
+            if (_newTileSizeIndex >= presets.Length) _newTileSizeIndex = presets.Length - 1;
+            string[] sizeLabels = new string[presets.Length];
+            for (int i = 0; i < presets.Length; i++) sizeLabels[i] = presets[i].label;
+            _newTileSizeIndex = EditorGUILayout.Popup("瓦片大小", _newTileSizeIndex, sizeLabels);
+
+            var selPreset = presets[_newTileSizeIndex];
+            if (_newTileShape == TileShape.Hexagon)
+            {
+                float r = HexPresetToRadius(selPreset);
+                EditorGUILayout.HelpBox($"六边形外接圆半径: {r:F2} | 精灵尺寸: {selPreset.pixelWidth}×{selPreset.pixelHeight} px", MessageType.Info);
+            }
+            else
+            {
+                float cs = SquarePresetToCellSize(selPreset);
+                EditorGUILayout.HelpBox($"格子边长: {cs:F2} | 精灵尺寸: {selPreset.pixelWidth}×{selPreset.pixelHeight} px", MessageType.Info);
+            }
+
+            // 根据标签显示不同字段
+            if (_newResourceTag == "单位")
+            {
+                _newUnitAttack = EditorGUILayout.IntField("攻击力", _newUnitAttack);
+                _newUnitSpeed = EditorGUILayout.FloatField("速度", _newUnitSpeed);
+                _newUnitHealth = EditorGUILayout.IntField("生命值", _newUnitHealth);
+            }
+            else
+            {
+                _newTerrainType = (DefaultTerrainType)EditorGUILayout.EnumPopup("通行规则", _newTerrainType);
+            }
+
+            _newTerrainId = EditorGUILayout.TextField("资源 ID（必填）", _newTerrainId);
             _newTerrainName = EditorGUILayout.TextField("显示名称", _newTerrainName);
             _newTerrainType = (DefaultTerrainType)EditorGUILayout.EnumPopup("通行规则", _newTerrainType);
             _newTerrainSprite = EditorGUILayout.ObjectField("预览图标（可选）", _newTerrainSprite, typeof(Sprite), false) as Sprite;
@@ -694,7 +795,7 @@ public class MapEditorWindow : EditorWindow
             {
                 if (string.IsNullOrWhiteSpace(_newTerrainId))
                 {
-                    EditorUtility.DisplayDialog("创建失败", "地形 ID 不能为空", "确定");
+                    EditorUtility.DisplayDialog("创建失败", "资源 ID 不能为空", "确定");
                 }
                 else if (_config.ContainsId(_newTerrainId))
                 {
@@ -707,16 +808,44 @@ public class MapEditorWindow : EditorWindow
                         terrainId = _newTerrainId.Trim(),
                         terrainName = string.IsNullOrWhiteSpace(_newTerrainName) ? _newTerrainId.Trim() : _newTerrainName.Trim(),
                         defaultType = _newTerrainType,
-                        terrainSprite = _newTerrainSprite
+                        terrainSprite = _newTerrainSprite,
+                        prefab = _newTerrainPrefab,
+                        resourceTag = _newResourceTag,
+                        unitAttack = _newUnitAttack,
+                        unitSpeed = _newUnitSpeed,
+                        unitHealth = _newUnitHealth
                     };
                     _config.terrainResources.Add(terrain);
                     EditorUtility.SetDirty(_config);
                     _selectTerrainIndex = _config.terrainResources.Count - 1;
+
+                    // 根据瓦片形状联动格子尺寸
+                    var cPresets = _newTileShape == TileShape.Hexagon ? HexPresets : SquarePresets;
+                    if (_newTileShape == TileShape.Hexagon && _gridShape != GridShape.Square)
+                    {
+                        _cellSize = HexPresetToRadius(cPresets[_newTileSizeIndex]);
+                        OnDimensionChanged();
+                    }
+                    else if (_newTileShape == TileShape.Rectangle && _gridShape == GridShape.Square)
+                    {
+                        _cellSize = SquarePresetToCellSize(cPresets[_newTileSizeIndex]);
+                        OnDimensionChanged();
+                    }
+
                     // 重置创建表单
                     _newTerrainId = "";
                     _newTerrainName = "";
                     _newTerrainType = DefaultTerrainType.Passable;
                     _newTerrainSprite = null;
+                    _newTerrainPrefab = null;
+                    _newTileShape = TileShape.Rectangle;
+                    _newTileSizeIndex = 2;
+                    _newResourceTag = "地形";
+                    _customTagInput = "";
+                    _useCustomTag = false;
+                    _newUnitAttack = 10;
+                    _newUnitSpeed = 5f;
+                    _newUnitHealth = 100;
                     _showNewTerrainForm = false;
                     Repaint();
                 }
@@ -728,6 +857,15 @@ public class MapEditorWindow : EditorWindow
                 _newTerrainId = "";
                 _newTerrainName = "";
                 _newTerrainSprite = null;
+                _newTerrainPrefab = null;
+                _newTileShape = TileShape.Rectangle;
+                _newTileSizeIndex = 2;
+                _newResourceTag = "地形";
+                _customTagInput = "";
+                _useCustomTag = false;
+                _newUnitAttack = 10;
+                _newUnitSpeed = 5f;
+                _newUnitHealth = 100;
             }
             EditorGUILayout.EndHorizontal();
         }
@@ -775,9 +913,12 @@ public class MapEditorWindow : EditorWindow
             // 标题文本
             string idDisplay = string.IsNullOrEmpty(terrain.terrainId) ? "???" : terrain.terrainId;
             string nameDisplay = string.IsNullOrEmpty(terrain.terrainName) ? "未命名" : terrain.terrainName;
-            string headerLabel = $"[{idDisplay}] {nameDisplay}";
+            string tagStr = string.IsNullOrEmpty(terrain.resourceTag) ? "" : $" <{terrain.resourceTag}>";
+            string headerLabel = $"[{idDisplay}] {nameDisplay}{tagStr}";
             if (terrain.terrainSprite != null)
                 headerLabel += " (有图标)";
+            if (terrain.resourceTag == "单位")
+                headerLabel += $" ATK:{terrain.unitAttack} SPD:{terrain.unitSpeed} HP:{terrain.unitHealth}";
 
             bool newExpanded = EditorGUILayout.Foldout(isExpanded, headerLabel, true);
             if (newExpanded != isExpanded)
@@ -811,6 +952,21 @@ public class MapEditorWindow : EditorWindow
                 terrain.terrainId = EditorGUILayout.TextField("唯一 ID", terrain.terrainId);
                 terrain.terrainName = EditorGUILayout.TextField("显示名称", terrain.terrainName);
                 terrain.terrainSprite = EditorGUILayout.ObjectField("预览图标", terrain.terrainSprite, typeof(Sprite), false) as Sprite;
+
+                var displayedPrefab = EditorGUILayout.ObjectField("关联预制体", terrain.prefab, typeof(GameObject), false) as GameObject;
+                if (displayedPrefab != terrain.prefab)
+                {
+                    terrain.prefab = displayedPrefab;
+                    EditorUtility.SetDirty(_config);
+                }
+
+                EditorGUILayout.LabelField("标签", terrain.resourceTag);
+                if (terrain.resourceTag == "单位")
+                {
+                    terrain.unitAttack = EditorGUILayout.IntField("攻击力", terrain.unitAttack);
+                    terrain.unitSpeed = EditorGUILayout.FloatField("速度", terrain.unitSpeed);
+                    terrain.unitHealth = EditorGUILayout.IntField("生命值", terrain.unitHealth);
+                }
 
                 // 精灵尺寸检测
                 if (terrain.terrainSprite != null)
@@ -1155,6 +1311,13 @@ public class MapEditorWindow : EditorWindow
         };
     }
 
+    private static Sprite ExtractSpriteFromPrefab(GameObject prefab)
+    {
+        if (prefab == null) return null;
+        var sr = prefab.GetComponent<SpriteRenderer>();
+        return sr != null ? sr.sprite : null;
+    }
+
     // ============================================================
     //  悬停预览
     // ============================================================
@@ -1199,7 +1362,7 @@ public class MapEditorWindow : EditorWindow
         {
             if (_selectTerrainIndex < _config.terrainResources.Count)
             {
-                var t = _config.terrainResources[_selectTerrainIndex];
+                var t = _selectedTerrain;
                 previewColor = GetTerrainDisplayColor(t);
             }
             else previewColor = Color.gray;
@@ -1256,12 +1419,13 @@ public class MapEditorWindow : EditorWindow
         }
         else if (!IsCurrentLayerTerrain)
         {
-            var u = _unitConfigs.Count > _selectUnitIndex ? _unitConfigs[_selectUnitIndex] : null;
-            tooltip = u != null ? $"{u.unitName} ({u.unitId}) @ [{cell.x},{cell.y}]" : $"无 @ [{cell.x},{cell.y}]";
+            var units = _config.terrainResources.Where(t => t != null && t.resourceTag == "单位").ToList();
+            var u = _selectUnitIndex < units.Count ? units[_selectUnitIndex] : null;
+            tooltip = u != null ? $"{u.terrainName} ({u.terrainId}) @ [{cell.x},{cell.y}]" : $"无 @ [{cell.x},{cell.y}]";
         }
         else
         {
-            var t = _config.terrainResources.Count > _selectTerrainIndex ? _config.terrainResources[_selectTerrainIndex] : null;
+            var t = _selectedTerrain;
             tooltip = t != null ? $"{t.terrainName} ({t.terrainId}) @ [{cell.x},{cell.y}]" : $"无 @ [{cell.x},{cell.y}]";
         }
         var style = new GUIStyle(GUI.skin.box) { fontSize = 12, alignment = TextAnchor.MiddleLeft, normal = { textColor = Color.white } };
@@ -1306,8 +1470,7 @@ public class MapEditorWindow : EditorWindow
         }
         else
         {
-            var terrain = _config.terrainResources.Count > _selectTerrainIndex
-                ? _config.terrainResources[_selectTerrainIndex] : null;
+            var terrain = _selectedTerrain;
             previewColor = GetTerrainDisplayColor(terrain);
             alpha = 0.3f;
         }
@@ -1361,8 +1524,7 @@ public class MapEditorWindow : EditorWindow
         }
         else
         {
-            var terrain = _config.terrainResources.Count > _selectTerrainIndex
-                ? _config.terrainResources[_selectTerrainIndex] : null;
+            var terrain = _selectedTerrain;
             tooltip = terrain != null
                 ? $"{terrain.terrainName} ({terrain.terrainId}) @ [{cell.x},{cell.y}]"
                 : $"无选中地形 @ [{cell.x},{cell.y}]";
@@ -1416,7 +1578,7 @@ public class MapEditorWindow : EditorWindow
                     if (_selectTerrainIndex < _config.terrainResources.Count)
                     {
                         BeginUndoOp();
-                        DoFloodFill(cellPos, _config.terrainResources[_selectTerrainIndex].terrainId);
+                        DoFloodFill(cellPos, _selectedTerrain.terrainId);
                         EndUndoOp();
                         Repaint();
                     }
@@ -1460,7 +1622,7 @@ public class MapEditorWindow : EditorWindow
                     if (_selectTerrainIndex < _config.terrainResources.Count)
                     {
                         BeginUndoOp();
-                        HexFloodFill(cell, _config.terrainResources[_selectTerrainIndex].terrainId);
+                        HexFloodFill(cell, _selectedTerrain.terrainId);
                         EndUndoOp();
                         Repaint();
                     }
@@ -1473,7 +1635,7 @@ public class MapEditorWindow : EditorWindow
                     if (_selectTerrainIndex < _config.terrainResources.Count)
                     {
                         BeginUndoOp();
-                        HexRangeFill(cell, _hexFillRange, _config.terrainResources[_selectTerrainIndex].terrainId);
+                        HexRangeFill(cell, _hexFillRange, _selectedTerrain.terrainId);
                         EndUndoOp();
                         Repaint();
                     }
@@ -1533,7 +1695,7 @@ public class MapEditorWindow : EditorWindow
             if (_selectTerrainIndex < _config.terrainResources.Count)
             {
                 BeginUndoOp();
-                HexFillRhombus(_rectStart, hex, _config.terrainResources[_selectTerrainIndex].terrainId);
+                HexFillRhombus(_rectStart, hex, _selectedTerrain.terrainId);
                 EndUndoOp();
                 Repaint();
             }
@@ -1661,7 +1823,7 @@ public class MapEditorWindow : EditorWindow
             if (_selectTerrainIndex < _config.terrainResources.Count)
             {
                 BeginUndoOp();
-                FillRect(_rectStart, cellPos, _config.terrainResources[_selectTerrainIndex].terrainId);
+                FillRect(_rectStart, cellPos, _selectedTerrain.terrainId);
                 EndUndoOp();
                 Repaint();
             }
@@ -1685,9 +1847,11 @@ public class MapEditorWindow : EditorWindow
     {
         if (mode == EditMode.Brush)
         {
-            if (_selectTerrainIndex < _config.terrainResources.Count)
+            var terrainList = _config.terrainResources
+                .Where(t => t != null && t.resourceTag != "单位").ToList();
+            if (_selectTerrainIndex < terrainList.Count)
             {
-                string tid = _config.terrainResources[_selectTerrainIndex].terrainId;
+                string tid = terrainList[_selectTerrainIndex].terrainId;
                 RecordChange(cellPos);
                 _mapGrid[cellPos] = tid;
             }
@@ -1706,9 +1870,11 @@ public class MapEditorWindow : EditorWindow
     {
         if (mode == EditMode.Brush)
         {
-            if (_selectUnitIndex < _unitConfigs.Count)
+            var unitResources = _config.terrainResources
+                .Where(t => t != null && t.resourceTag == "单位").ToList();
+            if (_selectUnitIndex < unitResources.Count)
             {
-                string uid = _unitConfigs[_selectUnitIndex].unitId;
+                string uid = unitResources[_selectUnitIndex].terrainId;
                 RecordChange(cellPos);
                 _unitGrid[cellPos] = uid;
             }
@@ -2069,7 +2235,18 @@ public class MapEditorWindow : EditorWindow
     internal HexGridUtils.HexOrientation CurrentHexOrientationInternal => CurrentHexOrientation;
     internal List<Dictionary<Vector2Int, string>> AllLayers => _allLayers;
     internal EditMode CurrentEditMode => _editMode;
-    internal string SelectedTerrainId => _config != null && _selectTerrainIndex < _config.terrainResources.Count ? _config.terrainResources[_selectTerrainIndex].terrainId : "";
+    internal string SelectedTerrainId => _selectedTerrain != null ? _selectedTerrain.terrainId : "";
+
+    private TerrainResource _selectedTerrain
+    {
+        get
+        {
+            var list = _config?.terrainResources?.Where(t => t != null && t.resourceTag != "单位").ToList();
+            if (list == null || list.Count == 0) return null;
+            if (_selectTerrainIndex < 0 || _selectTerrainIndex >= list.Count) return null;
+            return list[_selectTerrainIndex];
+        }
+    }
 
     internal string GetCellTerrain(int x, int y, int layer)
     {
@@ -2094,6 +2271,8 @@ public class MapEditorWindow : EditorWindow
     internal int HexFillRange => _hexFillRange;
     internal string GetUnitNameById(string unitId)
     {
+        var res = _config.terrainResources.Find(t => t != null && t.terrainId == unitId);
+        if (res != null) return res.terrainName;
         foreach (var uc in _unitConfigs)
             if (uc != null && uc.unitId == unitId) return uc.unitName;
         return unitId;

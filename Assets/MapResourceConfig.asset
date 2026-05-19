@@ -16,66 +16,77 @@ MonoBehaviour:
   - terrainId: 
     terrainName: 
     terrainSprite: {fileID: 0}
+    prefab: {fileID: 0}
+    resourceTag: "\u5730\u5F62"
+    unitAttack: 10
+    unitSpeed: 5
+    unitHealth: 100
     defaultType: 0
     blockUnitIds: []
     customProperties: []
   - terrainId: 
     terrainName: 
     terrainSprite: {fileID: 0}
+    prefab: {fileID: 0}
+    resourceTag: "\u5730\u5F62"
+    unitAttack: 10
+    unitSpeed: 5
+    unitHealth: 100
     defaultType: 0
     blockUnitIds: []
     customProperties: []
   - terrainId: 
     terrainName: 
     terrainSprite: {fileID: 0}
+    prefab: {fileID: 0}
+    resourceTag: "\u5730\u5F62"
+    unitAttack: 10
+    unitSpeed: 5
+    unitHealth: 100
     defaultType: 0
     blockUnitIds: []
     customProperties: []
   - terrainId: 
     terrainName: 
     terrainSprite: {fileID: 0}
+    prefab: {fileID: 0}
+    resourceTag: "\u5730\u5F62"
+    unitAttack: 10
+    unitSpeed: 5
+    unitHealth: 100
     defaultType: 0
     blockUnitIds: []
     customProperties: []
   - terrainId: 
     terrainName: 
     terrainSprite: {fileID: 0}
+    prefab: {fileID: 0}
+    resourceTag: "\u5730\u5F62"
+    unitAttack: 10
+    unitSpeed: 5
+    unitHealth: 100
     defaultType: 0
     blockUnitIds: []
     customProperties: []
   - terrainId: 
     terrainName: 
     terrainSprite: {fileID: 0}
-    defaultType: 0
-    blockUnitIds: []
-    customProperties: []
-  - terrainId: 
-    terrainName: 
-    terrainSprite: {fileID: 0}
-    defaultType: 0
-    blockUnitIds: []
-    customProperties: []
-  - terrainId: 
-    terrainName: 
-    terrainSprite: {fileID: 0}
-    defaultType: 0
-    blockUnitIds: []
-    customProperties: []
-  - terrainId: 
-    terrainName: 
-    terrainSprite: {fileID: 0}
-    defaultType: 0
-    blockUnitIds: []
-    customProperties: []
-  - terrainId: 
-    terrainName: 
-    terrainSprite: {fileID: 0}
+    prefab: {fileID: 0}
+    resourceTag: "\u5730\u5F62"
+    unitAttack: 10
+    unitSpeed: 5
+    unitHealth: 100
     defaultType: 0
     blockUnitIds: []
     customProperties: []
   - terrainId: 5
     terrainName: 1
     terrainSprite: {fileID: 10907, guid: 0000000000000000f000000000000000, type: 0}
+    prefab: {fileID: 0}
+    resourceTag: "\u5730\u5F62"
+    unitAttack: 10
+    unitSpeed: 5
+    unitHealth: 100
     defaultType: 0
     blockUnitIds: []
     customProperties: []
