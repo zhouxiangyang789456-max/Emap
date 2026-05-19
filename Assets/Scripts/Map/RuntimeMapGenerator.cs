@@ -52,20 +52,47 @@ public class RuntimeMapGenerator : MonoBehaviour
 
     private void CreateMapFloor()
     {
-        GameObject floor = GameObject.CreatePrimitive(PrimitiveType.Plane);
-        floor.name = "MapFloor";
-        floor.transform.SetParent(mapRoot);
+        bool isHex = _loadedData.IsHex;
 
-        float scaleX = _loadedData.mapWidth / 10f;
-        float scaleZ = _loadedData.mapHeight / 10f;
-        floor.transform.localScale = new Vector3(scaleX, 1f, scaleZ);
-        floor.transform.position = new Vector3(_loadedData.mapWidth * 0.5f, -0.01f, _loadedData.mapHeight * 0.5f);
+        if (isHex)
+        {
+            var orient = _loadedData.hexOrientation == "PointyTop"
+                ? HexGridUtils.HexOrientation.PointyTop
+                : HexGridUtils.HexOrientation.FlatTop;
+            float cellSize = _loadedData.cellSize > 0 ? _loadedData.cellSize : 1f;
+            var bounds = HexGridUtils.GetMapBoundsWorld3D(
+                _loadedData.mapWidth, _loadedData.mapHeight, cellSize, orient);
 
-        var renderer = floor.GetComponent<MeshRenderer>();
-        if (terrainMaterial != null)
-            renderer.material = terrainMaterial;
+            GameObject floor = GameObject.CreatePrimitive(PrimitiveType.Plane);
+            floor.name = "MapFloor";
+            floor.transform.SetParent(mapRoot);
+            float bw = bounds.max.x - bounds.min.x;
+            float bh = bounds.max.z - bounds.min.z;
+            floor.transform.localScale = new Vector3(bw / 10f, 1f, bh / 10f);
+            floor.transform.position = new Vector3(
+                (bounds.min.x + bounds.max.x) * 0.5f, -0.01f,
+                (bounds.min.z + bounds.max.z) * 0.5f);
 
-        Destroy(floor.GetComponent<Collider>());
+            var renderer = floor.GetComponent<MeshRenderer>();
+            if (terrainMaterial != null)
+                renderer.material = terrainMaterial;
+            Destroy(floor.GetComponent<Collider>());
+        }
+        else
+        {
+            GameObject floor = GameObject.CreatePrimitive(PrimitiveType.Plane);
+            floor.name = "MapFloor";
+            floor.transform.SetParent(mapRoot);
+            float scaleX = _loadedData.mapWidth / 10f;
+            float scaleZ = _loadedData.mapHeight / 10f;
+            floor.transform.localScale = new Vector3(scaleX, 1f, scaleZ);
+            floor.transform.position = new Vector3(_loadedData.mapWidth * 0.5f, -0.01f, _loadedData.mapHeight * 0.5f);
+
+            var renderer = floor.GetComponent<MeshRenderer>();
+            if (terrainMaterial != null)
+                renderer.material = terrainMaterial;
+            Destroy(floor.GetComponent<Collider>());
+        }
     }
 
     private void SpawnCell(MapCellData cell)
@@ -77,7 +104,21 @@ public class RuntimeMapGenerator : MonoBehaviour
             return;
         }
 
-        Vector3 pos = new Vector3(cell.x + 0.5f, spriteYOffset, cell.y + 0.5f);
+        Vector3 pos;
+        if (_loadedData.IsHex)
+        {
+            var orient = _loadedData.hexOrientation == "PointyTop"
+                ? HexGridUtils.HexOrientation.PointyTop
+                : HexGridUtils.HexOrientation.FlatTop;
+            float cellSize = _loadedData.cellSize > 0 ? _loadedData.cellSize : 1f;
+            pos = HexGridUtils.OffsetToWorld3D(cell.x, cell.y, cellSize, orient);
+            pos.y = spriteYOffset;
+        }
+        else
+        {
+            pos = new Vector3(cell.x + 0.5f, spriteYOffset, cell.y + 0.5f);
+        }
+
         GameObject cellGo = new GameObject($"Cell_{cell.x}_{cell.y}");
         cellGo.transform.SetParent(mapRoot);
         cellGo.transform.position = pos;

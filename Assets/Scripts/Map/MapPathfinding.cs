@@ -18,6 +18,9 @@ public static class MapPathfinding
 
         Vector2Int start = new Vector2Int(startX, startY);
         Vector2Int end = new Vector2Int(endX, endY);
+        if (start == end) return new List<Vector2Int> { start };
+
+        bool isHex = mapData.IsHex;
 
         int initCapacity = Mathf.Min(mapData.mapWidth * mapData.mapHeight, 512);
         var openSet = new Heap<Node>(initCapacity);
@@ -26,12 +29,8 @@ public static class MapPathfinding
 
         Node startNode = GetOrCreateNode(startX, startY, nodeCache);
         startNode.gCost = 0;
-        startNode.hCost = Heuristic(startX, startY, endX, endY);
+        startNode.hCost = Heuristic(startX, startY, endX, endY, mapData);
         openSet.Add(startNode);
-
-        int[][] directions = allowDiagonal
-            ? new int[][] { new[] { 0, 1 }, new[] { 1, 0 }, new[] { 0, -1 }, new[] { -1, 0 }, new[] { 1, 1 }, new[] { 1, -1 }, new[] { -1, -1 }, new[] { -1, 1 } }
-            : new int[][] { new[] { 0, 1 }, new[] { 1, 0 }, new[] { 0, -1 }, new[] { -1, 0 } };
 
         while (openSet.Count > 0)
         {
@@ -42,23 +41,29 @@ public static class MapPathfinding
 
             closedSet.Add(current.pos);
 
-            foreach (var dir in directions)
+            var neighbors = isHex
+                ? GetHexNeighbors(current, mapData)
+                : GetSquareNeighbors(current, allowDiagonal);
+
+            foreach (var dir in neighbors)
             {
-                int nx = current.pos.x + dir[0];
-                int ny = current.pos.y + dir[1];
+                int nx = current.pos.x + dir.x;
+                int ny = current.pos.y + dir.y;
 
                 if (!IsInBounds(nx, ny, mapData)) continue;
                 if (closedSet.Contains(new Vector2Int(nx, ny))) continue;
                 if (!IsPassable(nx, ny, unitId, mapData)) continue;
 
-                if (Mathf.Abs(dir[0]) == 1 && Mathf.Abs(dir[1]) == 1)
+                // 方形对角穿角检测
+                if (!isHex && allowDiagonal && Mathf.Abs(dir.x) == 1 && Mathf.Abs(dir.y) == 1)
                 {
-                    if (!IsPassable(current.pos.x + dir[0], current.pos.y, unitId, mapData)) continue;
-                    if (!IsPassable(current.pos.x, current.pos.y + dir[1], unitId, mapData)) continue;
+                    if (!IsPassable(current.pos.x + dir.x, current.pos.y, unitId, mapData)) continue;
+                    if (!IsPassable(current.pos.x, current.pos.y + dir.y, unitId, mapData)) continue;
                 }
 
                 Node neighbor = GetOrCreateNode(nx, ny, nodeCache);
-                float moveCost = (Mathf.Abs(dir[0]) + Mathf.Abs(dir[1]) == 2) ? 1.414f : 1f;
+                float moveCost = isHex ? 1f
+                    : (Mathf.Abs(dir.x) + Mathf.Abs(dir.y) == 2) ? 1.414f : 1f;
 
                 var terrain = GameMapGlobal.GetTerrainAt(nx, ny, 0, mapData);
                 if (terrain != null)
@@ -71,7 +76,7 @@ public static class MapPathfinding
                 if (newGCost < neighbor.gCost)
                 {
                     neighbor.gCost = newGCost;
-                    neighbor.hCost = Heuristic(nx, ny, endX, endY);
+                    neighbor.hCost = Heuristic(nx, ny, endX, endY, mapData);
                     neighbor.parent = current;
 
                     if (!openSet.Contains(neighbor))
@@ -85,6 +90,31 @@ public static class MapPathfinding
         return new List<Vector2Int>();
     }
 
+    private static List<Vector2Int> GetHexNeighbors(Node current, MapJsonData mapData)
+    {
+        var orient = mapData.hexOrientation == "PointyTop"
+            ? HexGridUtils.HexOrientation.PointyTop
+            : HexGridUtils.HexOrientation.FlatTop;
+        return HexGridUtils.GetOffsetNeighbors(current.pos, orient);
+    }
+
+    private static List<Vector2Int> GetSquareNeighbors(Node current, bool allowDiagonal)
+    {
+        var result = new List<Vector2Int>(allowDiagonal ? 8 : 4);
+        result.Add(new Vector2Int(0, 1));
+        result.Add(new Vector2Int(1, 0));
+        result.Add(new Vector2Int(0, -1));
+        result.Add(new Vector2Int(-1, 0));
+        if (allowDiagonal)
+        {
+            result.Add(new Vector2Int(1, 1));
+            result.Add(new Vector2Int(1, -1));
+            result.Add(new Vector2Int(-1, -1));
+            result.Add(new Vector2Int(-1, 1));
+        }
+        return result;
+    }
+
     public static bool IsPassable(int x, int y, string unitId, MapJsonData mapData)
     {
         return GameMapGlobal.CheckUnitCanPassAt(x, y, 0, unitId, mapData);
@@ -95,8 +125,16 @@ public static class MapPathfinding
         return x >= 0 && x < mapData.mapWidth && y >= 0 && y < mapData.mapHeight;
     }
 
-    private static int Heuristic(int x1, int y1, int x2, int y2)
+    private static int Heuristic(int x1, int y1, int x2, int y2, MapJsonData mapData)
     {
+        if (mapData.IsHex)
+        {
+            var orient = mapData.hexOrientation == "PointyTop"
+                ? HexGridUtils.HexOrientation.PointyTop
+                : HexGridUtils.HexOrientation.FlatTop;
+            return 10 * HexGridUtils.OffsetDistance(new Vector2Int(x1, y1), new Vector2Int(x2, y2), orient);
+        }
+
         int dx = Mathf.Abs(x1 - x2);
         int dy = Mathf.Abs(y1 - y2);
         return 10 * (dx + dy) + (14 - 2 * 10) * Mathf.Min(dx, dy);

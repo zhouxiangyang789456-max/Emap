@@ -14,10 +14,13 @@ public class MapEditorWindow : EditorWindow
     private int _mapWidth = 30;
     private int _mapHeight = 30;
     private float _cellSize = 1f;
+    private GridShape _gridShape = GridShape.Square;
+    private int _hexFillRange = 1;
 
     // ===== 编辑状态 =====
-    internal enum EditMode { Brush, Eraser, RectangleFill, FloodFill }
+    internal enum EditMode { Brush, Eraser, RectangleFill, FloodFill, HexRangeFill }
     internal enum LayerType { Terrain, Object }
+    internal enum GridShape { Square, HexFlatTop, HexPointyTop }
     private EditMode _editMode = EditMode.Brush;
     private int _selectTerrainIndex = 0;
     private int _selectUnitIndex = 0;
@@ -135,7 +138,16 @@ public class MapEditorWindow : EditorWindow
 
     private void SaveState()
     {
-        var data = new MapJsonData { mapName = _mapName, mapWidth = _mapWidth, mapHeight = _mapHeight, layerCount = _allLayers.Count };
+        var data = new MapJsonData
+        {
+            mapName = _mapName,
+            mapWidth = _mapWidth,
+            mapHeight = _mapHeight,
+            layerCount = _allLayers.Count,
+            cellSize = _cellSize,
+            gridShape = _gridShape == GridShape.Square ? "Square" : "Hex",
+            hexOrientation = _gridShape == GridShape.HexPointyTop ? "PointyTop" : "FlatTop"
+        };
         for (int layer = 0; layer < _allLayers.Count; layer++)
             foreach (var kv in _allLayers[layer])
                 data.cellDatas.Add(new MapCellData { x = kv.Key.x, y = kv.Key.y, layer = layer, terrainId = kv.Value });
@@ -156,6 +168,12 @@ public class MapEditorWindow : EditorWindow
             _mapName = data.mapName;
             _mapWidth = Mathf.Max(1, data.mapWidth);
             _mapHeight = Mathf.Max(1, data.mapHeight);
+            if (data.cellSize > 0) _cellSize = data.cellSize;
+            if (!string.IsNullOrEmpty(data.gridShape))
+                _gridShape = data.gridShape == "Hex"
+                    ? (data.hexOrientation == "PointyTop" ? GridShape.HexPointyTop : GridShape.HexFlatTop)
+                    : GridShape.Square;
+
             _allLayers.Clear();
             _allUnitLayers.Clear();
             _layerTypes.Clear();
@@ -292,19 +310,58 @@ public class MapEditorWindow : EditorWindow
         _mapName = EditorGUILayout.TextField("地图名称", _mapName);
         _mapWidth = Mathf.Max(1, EditorGUILayout.IntField("地图宽度（格子）", _mapWidth));
         _mapHeight = Mathf.Max(1, EditorGUILayout.IntField("地图高度（格子）", _mapHeight));
-        _cellSize = Mathf.Max(0.1f, EditorGUILayout.FloatField("格子尺寸", _cellSize));
 
-        // 常用尺寸预设
+        // 网格形状选择
+        EditorGUILayout.LabelField("网格形状", EditorStyles.boldLabel);
+        var newShape = (GridShape)EditorGUILayout.EnumPopup("网格类型", _gridShape);
+        if (newShape != _gridShape)
+        {
+            OnGridShapeChanged(newShape);
+        }
+
+        if (_gridShape != GridShape.Square)
+        {
+            EditorGUILayout.HelpBox(
+                "六边形模式：x=列(col)，y=行(row)，矩形 mapWidth×mapHeight 蜂窝（与 Unity Hex Tilemap 一致）。\n" +
+                "若网格线仍有空隙，请切换到 3D 再切回 2D，或修改格子尺寸以重建 Grid。",
+                MessageType.Info);
+        }
+
+        string cellSizeLabel = _gridShape == GridShape.Square
+            ? "格子尺寸（正方形边长）"
+            : "格子尺寸（六边形外接圆半径）";
+        EditorGUI.BeginChangeCheck();
+        _cellSize = Mathf.Max(0.1f, EditorGUILayout.FloatField(cellSizeLabel, _cellSize));
+        if (EditorGUI.EndChangeCheck() && _dimension == MapEditDimension.TwoD)
+            _scene2D?.EnsureGridConfigured();
+
+        // 尺寸预设
         EditorGUILayout.BeginHorizontal();
         EditorGUILayout.LabelField("快速预设", GUILayout.Width(60));
-        float[] presets = { 0.16f, 0.32f, 0.64f, 1f, 1.28f };
-        string[] presetLabels = { "16", "32", "64", "100", "128" };
-        for (int i = 0; i < presets.Length; i++)
+        if (_gridShape != GridShape.Square)
         {
-            if (GUILayout.Button(presetLabels[i], GUILayout.Width(38), GUILayout.Height(18)))
+            float[] hexPresets = { 0.5f, 0.75f, 1.0f, 1.5f, 2.0f };
+            string[] hexLabels = { "0.5", "0.75", "1.0", "1.5", "2.0" };
+            for (int i = 0; i < hexPresets.Length; i++)
             {
-                _cellSize = presets[i];
-                OnDimensionChanged();
+                if (GUILayout.Button(hexLabels[i], GUILayout.Width(38), GUILayout.Height(18)))
+                {
+                    _cellSize = hexPresets[i];
+                    OnDimensionChanged();
+                }
+            }
+        }
+        else
+        {
+            float[] presets = { 0.16f, 0.32f, 0.64f, 1f, 1.28f };
+            string[] presetLabels = { "16", "32", "64", "100", "128" };
+            for (int i = 0; i < presets.Length; i++)
+            {
+                if (GUILayout.Button(presetLabels[i], GUILayout.Width(38), GUILayout.Height(18)))
+                {
+                    _cellSize = presets[i];
+                    OnDimensionChanged();
+                }
             }
         }
         EditorGUILayout.EndHorizontal();
@@ -317,7 +374,20 @@ public class MapEditorWindow : EditorWindow
         foreach (var layer in _allUnitLayers) totalCells += layer.Count;
         string layerTypeLabel = IsCurrentLayerTerrain ? "地形" : "对象";
         int currentCount = IsCurrentLayerTerrain ? _mapGrid.Count : _unitGrid.Count;
-        EditorGUILayout.HelpBox($"当前地图: {_mapWidth}×{_mapHeight}, 总格子 {totalCells} | 层 {_currentLayer} [{layerTypeLabel}]: {currentCount} 格", MessageType.Info);
+        string coordLabel = _gridShape == GridShape.Square ? "" : " (坐标: 列/行)";
+        EditorGUILayout.HelpBox($"当前地图: {_mapWidth}×{_mapHeight}, 总格子 {totalCells} | 层 {_currentLayer} [{layerTypeLabel}]: {currentCount} 格{coordLabel}", MessageType.Info);
+
+        if (_gridShape != GridShape.Square)
+        {
+            var bounds = HexGridUtils.GetMapBoundsWorld2D(_mapWidth, _mapHeight, _cellSize, CurrentHexOrientation);
+            float approxWidth = bounds.max.x - bounds.min.x;
+            float approxHeight = bounds.max.y - bounds.min.y;
+            EditorGUILayout.HelpBox(
+                $"六边形矩形地图: {_mapWidth} 列 × {_mapHeight} 行 = {_mapWidth * _mapHeight} 格\n" +
+                $"物理尺寸约: {approxWidth:F1} × {approxHeight:F1} 单位\n" +
+                $"坐标: 列∈[0,{_mapWidth - 1}], 行∈[0,{_mapHeight - 1}]（与 Unity Hex Tilemap 一致）",
+                MessageType.Info);
+        }
 
         // 层切换
         EditorGUILayout.LabelField("层级管理", EditorStyles.boldLabel);
@@ -442,26 +512,37 @@ public class MapEditorWindow : EditorWindow
     //  编辑模式
     // ============================================================
 
-    private static readonly string[] EditModeNames = { "笔刷", "橡皮", "矩形填充", "洪水填充" };
+    private string[] GetEditModeNames()
+    {
+        if (_gridShape != GridShape.Square)
+            return new[] { "笔刷", "橡皮", "菱形填充", "洪水填充", "范围填充" };
+        else
+            return new[] { "笔刷", "橡皮", "矩形填充", "洪水填充" };
+    }
 
     private void DrawEditMode()
     {
         EditorGUILayout.LabelField("编辑模式", EditorStyles.boldLabel);
         int modeIndex = (int)_editMode;
 
-        // 对象层只支持笔刷和橡皮
         if (!IsCurrentLayerTerrain)
         {
             string[] objectModeNames = { "笔刷（放置单位）", "橡皮（移除单位）" };
-            // 映射: 0=Brush->0, 1=Eraser->1, 2=RectangleFill->0, 3=FloodFill->0
             if (modeIndex > 1) modeIndex = 0;
             modeIndex = EditorGUILayout.Popup("当前模式", modeIndex, objectModeNames);
         }
         else
         {
-            modeIndex = EditorGUILayout.Popup("当前模式", modeIndex, EditModeNames);
+            string[] names = GetEditModeNames();
+            if (modeIndex >= names.Length) modeIndex = 0;
+            modeIndex = EditorGUILayout.Popup("当前模式", modeIndex, names);
         }
-        _editMode = (EditMode)Mathf.Clamp(modeIndex, 0, EditModeNames.Length - 1);
+        _editMode = (EditMode)Mathf.Clamp(modeIndex, 0, _gridShape != GridShape.Square ? 4 : 3);
+
+        if (_gridShape != GridShape.Square && _editMode == EditMode.HexRangeFill)
+        {
+            _hexFillRange = EditorGUILayout.IntSlider("填充范围", _hexFillRange, 0, 10);
+        }
     }
 
     // ============================================================
@@ -838,6 +919,41 @@ public class MapEditorWindow : EditorWindow
     }
 
     // ============================================================
+    //  网格形状切换
+    // ============================================================
+
+    private void OnGridShapeChanged(GridShape newShape)
+    {
+        if (_gridShape == newShape) return;
+
+        bool proceed = EditorUtility.DisplayDialog(
+            "切换网格形状",
+            "切换网格形状将清空当前地图数据。是否继续？",
+            "确定", "取消");
+
+        if (!proceed) return;
+
+        _gridShape = newShape;
+        foreach (var layer in _allLayers) layer.Clear();
+        foreach (var layer in _allUnitLayers) layer.Clear();
+        _undoStack.Clear();
+        _redoStack.Clear();
+        if (_editMode == EditMode.RectangleFill || _editMode == EditMode.HexRangeFill)
+            _editMode = EditMode.Brush;
+        if (_dimension == MapEditDimension.TwoD)
+            _scene2D?.RebuildScene();
+        Repaint();
+        SceneView.RepaintAll();
+    }
+
+    private HexGridUtils.HexOrientation CurrentHexOrientation =>
+        _gridShape == GridShape.HexFlatTop
+            ? HexGridUtils.HexOrientation.FlatTop
+            : HexGridUtils.HexOrientation.PointyTop;
+
+    private bool IsHexMode => _gridShape != GridShape.Square;
+
+    // ============================================================
     //  快捷键
     // ============================================================
 
@@ -877,6 +993,12 @@ public class MapEditorWindow : EditorWindow
 
     private void DrawGridGizmos()
     {
+        if (IsHexMode)
+        {
+            DrawHexGridGizmos();
+            return;
+        }
+
         float camDist = 50f;
         if (SceneView.lastActiveSceneView?.camera != null)
             camDist = Vector3.Distance(SceneView.lastActiveSceneView.camera.transform.position, Vector3.zero);
@@ -907,17 +1029,7 @@ public class MapEditorWindow : EditorWindow
             string tid = kv.Value;
             var terrain = _config.GetTerrainById(tid);
 
-            Color col = Color.gray;
-            if (terrain != null)
-            {
-                switch (terrain.defaultType)
-                {
-                    case DefaultTerrainType.Passable: col = Color.green; break;
-                    case DefaultTerrainType.Impassable: col = Color.red; break;
-                    case DefaultTerrainType.UnitImpassable: col = Color.yellow; break;
-                }
-            }
-
+            Color col = GetTerrainDisplayColor(terrain);
             Handles.color = new Color(col.r, col.g, col.b, 0.4f);
             Vector3 center = new Vector3(cell.x * _cellSize + _cellSize * 0.5f, 0, cell.y * _cellSize + _cellSize * 0.5f);
             Handles.CubeHandleCap(0, center, Quaternion.identity, _cellSize * 0.9f, EventType.Repaint);
@@ -946,11 +1058,115 @@ public class MapEditorWindow : EditorWindow
     }
 
     // ============================================================
+    //  六边形 3D 网格渲染
+    // ============================================================
+
+    private void DrawHexGridGizmos()
+    {
+        float camDist = 50f;
+        if (SceneView.lastActiveSceneView?.camera != null)
+            camDist = Vector3.Distance(SceneView.lastActiveSceneView.camera.transform.position, Vector3.zero);
+
+        int step = 1;
+        if (camDist > 100f) step = 4;
+        else if (camDist > 50f) step = 2;
+
+        var orient = CurrentHexOrientation;
+        float radius = _cellSize;
+
+        // 地图边界（矩形）
+        var bounds = HexGridUtils.GetMapBoundsWorld3D(_mapWidth, _mapHeight, radius, orient);
+        Handles.color = new Color(1f, 1f, 1f, 0.4f);
+        Vector3 b0 = new Vector3(bounds.min.x, 0.05f, bounds.min.z);
+        Vector3 b1 = new Vector3(bounds.max.x, 0.05f, bounds.min.z);
+        Vector3 b2 = new Vector3(bounds.max.x, 0.05f, bounds.max.z);
+        Vector3 b3 = new Vector3(bounds.min.x, 0.05f, bounds.max.z);
+        Handles.DrawAAPolyLine(2f, new[] { b0, b1, b2, b3, b0 });
+
+        // 网格线 (LOD)
+        Handles.color = new Color(0.2f, 0.8f, 0.2f, 0.3f);
+        for (int row = 0; row < _mapHeight; row += step)
+        {
+            for (int col = 0; col < _mapWidth; col += step)
+            {
+                Vector3 center = HexGridUtils.OffsetToWorld3D(col, row, radius, orient);
+                Vector3[] corners = HexGridUtils.GetHexOutlineCorners3D(
+                    center, HexGridUtils.GetUnityCellSize(radius, orient), orient);
+                Vector3[] closed = new Vector3[7];
+                System.Array.Copy(corners, closed, 6);
+                closed[6] = corners[0];
+                Handles.DrawAAPolyLine(1.5f, closed);
+            }
+        }
+
+        // 地形色块
+        foreach (var kv in _mapGrid)
+        {
+            Vector2Int cell = kv.Key;
+            string tid = kv.Value;
+            var terrain = _config.GetTerrainById(tid);
+            Color col = GetTerrainDisplayColor(terrain);
+            Handles.color = new Color(col.r, col.g, col.b, 0.4f);
+            Vector3 center = HexGridUtils.OffsetToWorld3D(cell, radius, orient);
+            Handles.DrawSolidDisc(center, Vector3.up, radius * 0.85f);
+        }
+
+        // 对象层单位标记
+        if (!IsCurrentLayerTerrain)
+        {
+            foreach (var kv in _unitGrid)
+            {
+                Vector2Int cell = kv.Key;
+                string uid = kv.Value;
+                Vector3 pos = HexGridUtils.OffsetToWorld3D(cell, radius, orient);
+                pos.y = 0.5f;
+                Handles.color = new Color(0.3f, 0.5f, 1f, 0.6f);
+                Vector3[] corners = HexGridUtils.GetHexCorners3D(pos, radius * 0.6f, orient);
+                Vector3[] closed = new Vector3[7];
+                System.Array.Copy(corners, closed, 6);
+                closed[6] = corners[0];
+                Handles.DrawAAConvexPolygon(closed);
+                Handles.Label(pos + Vector3.up * 0.5f, uid);
+            }
+        }
+
+        // 原点特殊高亮
+        Handles.color = new Color(1f, 1f, 0f, 0.5f);
+        Vector3 originCenter = HexGridUtils.OffsetToWorld3D(0, 0, radius, orient);
+        Vector3[] oCorners = HexGridUtils.GetHexOutlineCorners3D(
+            originCenter, HexGridUtils.GetUnityCellSize(radius, orient), orient);
+        Vector3[] oClosed = new Vector3[7];
+        System.Array.Copy(oCorners, oClosed, 6);
+        oClosed[6] = oCorners[0];
+        Handles.DrawAAPolyLine(3f, oClosed);
+        Handles.Label(originCenter + Vector3.up * 0.3f, "原点 (0,0)",
+            new GUIStyle() { normal = { textColor = Color.yellow } });
+    }
+
+    private static Color GetTerrainDisplayColor(TerrainResource terrain)
+    {
+        if (terrain == null) return Color.gray;
+        return terrain.defaultType switch
+        {
+            DefaultTerrainType.Passable => Color.green,
+            DefaultTerrainType.Impassable => Color.red,
+            DefaultTerrainType.UnitImpassable => Color.yellow,
+            _ => Color.gray
+        };
+    }
+
+    // ============================================================
     //  悬停预览
     // ============================================================
 
     private void DrawHoverPreview()
     {
+        if (IsHexMode)
+        {
+            DrawHexHoverPreview();
+            return;
+        }
+
         Event e = Event.current;
         if (e == null) return;
 
@@ -983,13 +1199,8 @@ public class MapEditorWindow : EditorWindow
         {
             if (_selectTerrainIndex < _config.terrainResources.Count)
             {
-                switch (_config.terrainResources[_selectTerrainIndex].defaultType)
-                {
-                    case DefaultTerrainType.Passable: previewColor = Color.green; break;
-                    case DefaultTerrainType.Impassable: previewColor = Color.red; break;
-                    case DefaultTerrainType.UnitImpassable: previewColor = Color.yellow; break;
-                    default: previewColor = Color.gray; break;
-                }
+                var t = _config.terrainResources[_selectTerrainIndex];
+                previewColor = GetTerrainDisplayColor(t);
             }
             else previewColor = Color.gray;
             alpha = 0.3f;
@@ -1025,25 +1236,136 @@ public class MapEditorWindow : EditorWindow
             SceneView.RepaintAll();
         }
 
-        // Tooltip
+        DrawSquareTooltip(e, activeMode, _hoveredCell);
+    }
+
+    // ============================================================
+    //  方形悬停 Tooltip
+    // ============================================================
+
+    private void DrawSquareTooltip(Event e, EditMode activeMode, Vector2Int cell)
+    {
         Handles.BeginGUI();
         string tooltip;
         if (activeMode == EditMode.Eraser)
         {
             bool hasData = IsCurrentLayerTerrain
-                ? _mapGrid.ContainsKey(_hoveredCell)
-                : _unitGrid.ContainsKey(_hoveredCell);
-            tooltip = hasData ? $"🗑 擦除 [{cx},{cy}]" : $"（空）[{cx},{cy}]";
+                ? _mapGrid.ContainsKey(cell)
+                : _unitGrid.ContainsKey(cell);
+            tooltip = hasData ? $"擦除 [{cell.x},{cell.y}]" : $"(空) [{cell.x},{cell.y}]";
         }
         else if (!IsCurrentLayerTerrain)
         {
             var u = _unitConfigs.Count > _selectUnitIndex ? _unitConfigs[_selectUnitIndex] : null;
-            tooltip = u != null ? $"👤 {u.unitName} ({u.unitId}) @ [{cx},{cy}]" : $"无 @ [{cx},{cy}]";
+            tooltip = u != null ? $"{u.unitName} ({u.unitId}) @ [{cell.x},{cell.y}]" : $"无 @ [{cell.x},{cell.y}]";
         }
         else
         {
             var t = _config.terrainResources.Count > _selectTerrainIndex ? _config.terrainResources[_selectTerrainIndex] : null;
-            tooltip = t != null ? $"🖌 {t.terrainName} ({t.terrainId}) @ [{cx},{cy}]" : $"无 @ [{cx},{cy}]";
+            tooltip = t != null ? $"{t.terrainName} ({t.terrainId}) @ [{cell.x},{cell.y}]" : $"无 @ [{cell.x},{cell.y}]";
+        }
+        var style = new GUIStyle(GUI.skin.box) { fontSize = 12, alignment = TextAnchor.MiddleLeft, normal = { textColor = Color.white } };
+        var content = new GUIContent(tooltip);
+        Vector2 size = style.CalcSize(content);
+        GUI.Box(new Rect(e.mousePosition.x + 20, e.mousePosition.y - 10, size.x + 10, 22), content, style);
+        Handles.EndGUI();
+    }
+
+    // ============================================================
+    //  六边形悬停预览
+    // ============================================================
+
+    private void DrawHexHoverPreview()
+    {
+        Event e = Event.current;
+        if (e == null) return;
+
+        Ray ray = HandleUtility.GUIPointToWorldRay(e.mousePosition);
+        Plane plane = new Plane(Vector3.up, Vector3.zero);
+        if (!plane.Raycast(ray, out float dist)) return;
+
+        Vector3 worldPos = ray.GetPoint(dist);
+        Vector2Int cell = HexGridUtils.WorldToOffset3D(worldPos, _cellSize, CurrentHexOrientation);
+        if (!HexGridUtils.IsInOffsetRect(cell.x, cell.y, _mapWidth, _mapHeight)) return;
+
+        _hoveredCell = cell;
+
+        EditMode activeMode = e.shift ? EditMode.Eraser : _editMode;
+        Color previewColor;
+        float alpha;
+
+        if (activeMode == EditMode.Eraser)
+        {
+            previewColor = Color.red;
+            alpha = 0.35f;
+        }
+        else if (!IsCurrentLayerTerrain)
+        {
+            previewColor = new Color(0.3f, 0.5f, 1f);
+            alpha = 0.35f;
+        }
+        else
+        {
+            var terrain = _config.terrainResources.Count > _selectTerrainIndex
+                ? _config.terrainResources[_selectTerrainIndex] : null;
+            previewColor = GetTerrainDisplayColor(terrain);
+            alpha = 0.3f;
+        }
+
+        Vector3 center = HexGridUtils.OffsetToWorld3D(cell, _cellSize, CurrentHexOrientation);
+
+        // 范围填充预览
+        if (activeMode == EditMode.HexRangeFill)
+        {
+            var cells = HexGridUtils.GetOffsetHexagonsInRange(
+                cell, _hexFillRange, _mapWidth, _mapHeight, CurrentHexOrientation);
+            Handles.color = new Color(previewColor.r, previewColor.g, previewColor.b, 0.15f);
+            foreach (var c in cells)
+            {
+                Vector3 cc = HexGridUtils.OffsetToWorld3D(c, _cellSize, CurrentHexOrientation);
+                Handles.DrawSolidDisc(cc, Vector3.up, _cellSize * 0.82f);
+            }
+        }
+
+        // 六边形填充
+        Handles.color = new Color(previewColor.r, previewColor.g, previewColor.b, alpha);
+        Handles.DrawSolidDisc(center, Vector3.up, _cellSize * 0.82f);
+
+        // 白色边框
+        Vector3[] corners = HexGridUtils.GetHexOutlineCorners3D(
+            center, HexGridUtils.GetUnityCellSize(_cellSize, CurrentHexOrientation), CurrentHexOrientation);
+        Vector3[] closed = new Vector3[7];
+        System.Array.Copy(corners, closed, 6);
+        closed[6] = corners[0];
+        Handles.color = new Color(1f, 1f, 1f, 0.6f);
+        Handles.DrawAAPolyLine(3f, closed);
+
+        if (_hoveredCell != _previousHoveredCell)
+        {
+            _previousHoveredCell = _hoveredCell;
+            SceneView.RepaintAll();
+        }
+
+        DrawHexTooltip(e, cell, activeMode);
+    }
+
+    private void DrawHexTooltip(Event e, Vector2Int cell, EditMode activeMode)
+    {
+        Handles.BeginGUI();
+        string tooltip;
+        if (activeMode == EditMode.Eraser)
+        {
+            tooltip = _mapGrid.ContainsKey(cell)
+                ? $"擦除 [{cell.x},{cell.y}]"
+                : $"(空) [{cell.x},{cell.y}]";
+        }
+        else
+        {
+            var terrain = _config.terrainResources.Count > _selectTerrainIndex
+                ? _config.terrainResources[_selectTerrainIndex] : null;
+            tooltip = terrain != null
+                ? $"{terrain.terrainName} ({terrain.terrainId}) @ [{cell.x},{cell.y}]"
+                : $"无选中地形 @ [{cell.x},{cell.y}]";
         }
         var style = new GUIStyle(GUI.skin.box) { fontSize = 12, alignment = TextAnchor.MiddleLeft, normal = { textColor = Color.white } };
         var content = new GUIContent(tooltip);
@@ -1058,6 +1380,12 @@ public class MapEditorWindow : EditorWindow
 
     private void HandleMouseInput()
     {
+        if (IsHexMode)
+        {
+            HandleHexMouseInput();
+            return;
+        }
+
         Event e = Event.current;
         if (e == null) return;
 
@@ -1095,6 +1423,190 @@ public class MapEditorWindow : EditorWindow
                     e.Use();
                 }
                 break;
+        }
+    }
+
+    // ============================================================
+    //  六边形鼠标输入
+    // ============================================================
+
+    private void HandleHexMouseInput()
+    {
+        Event e = Event.current;
+        if (e == null) return;
+
+        Ray ray = HandleUtility.GUIPointToWorldRay(e.mousePosition);
+        Plane plane = new Plane(Vector3.up, Vector3.zero);
+        if (!plane.Raycast(ray, out float dist)) return;
+
+        Vector3 worldPos = ray.GetPoint(dist);
+        Vector2Int cell = HexGridUtils.WorldToOffset3D(worldPos, _cellSize, CurrentHexOrientation);
+        if (!HexGridUtils.IsInOffsetRect(cell.x, cell.y, _mapWidth, _mapHeight)) return;
+
+        EditMode activeMode = e.shift ? EditMode.Eraser : _editMode;
+
+        switch (activeMode)
+        {
+            case EditMode.Brush:
+            case EditMode.Eraser:
+                HandleHexBrushOrErase(e, cell, activeMode);
+                break;
+            case EditMode.RectangleFill:
+                HandleHexRhombusFill(e, cell);
+                break;
+            case EditMode.FloodFill:
+                if (e.type == EventType.MouseDown && e.button == 0)
+                {
+                    if (_selectTerrainIndex < _config.terrainResources.Count)
+                    {
+                        BeginUndoOp();
+                        HexFloodFill(cell, _config.terrainResources[_selectTerrainIndex].terrainId);
+                        EndUndoOp();
+                        Repaint();
+                    }
+                    e.Use();
+                }
+                break;
+            case EditMode.HexRangeFill:
+                if (e.type == EventType.MouseDown && e.button == 0)
+                {
+                    if (_selectTerrainIndex < _config.terrainResources.Count)
+                    {
+                        BeginUndoOp();
+                        HexRangeFill(cell, _hexFillRange, _config.terrainResources[_selectTerrainIndex].terrainId);
+                        EndUndoOp();
+                        Repaint();
+                    }
+                    e.Use();
+                }
+                break;
+        }
+    }
+
+    private void HandleHexBrushOrErase(Event e, Vector2Int hex, EditMode mode)
+    {
+        if (e.type == EventType.MouseDown && e.button == 0)
+        {
+            _isPainting = true;
+            _lastPaintedCell = hex;
+            BeginUndoOp();
+            PaintCell(hex, mode);
+            EndUndoOp();
+            Repaint();
+            e.Use();
+        }
+        else if (e.type == EventType.MouseDrag && e.button == 0 && _isPainting)
+        {
+            if (hex != _lastPaintedCell)
+            {
+                _lastPaintedCell = hex;
+                BeginUndoOp();
+                PaintCell(hex, mode);
+                EndUndoOp();
+                Repaint();
+            }
+            e.Use();
+        }
+        else if (e.type == EventType.MouseUp && e.button == 0)
+        {
+            _isPainting = false;
+            e.Use();
+        }
+    }
+
+    private void HandleHexRhombusFill(Event e, Vector2Int hex)
+    {
+        if (e.type == EventType.MouseDown && e.button == 0)
+        {
+            _rectStart = hex;
+            _rectDragging = true;
+            e.Use();
+        }
+        else if (e.type == EventType.MouseDrag && e.button == 0 && _rectDragging)
+        {
+            SceneView.RepaintAll();
+            e.Use();
+        }
+        else if (e.type == EventType.MouseUp && e.button == 0 && _rectDragging)
+        {
+            _rectDragging = false;
+            if (_selectTerrainIndex < _config.terrainResources.Count)
+            {
+                BeginUndoOp();
+                HexFillRhombus(_rectStart, hex, _config.terrainResources[_selectTerrainIndex].terrainId);
+                EndUndoOp();
+                Repaint();
+            }
+            e.Use();
+        }
+    }
+
+    // ============================================================
+    //  六边形填充方法
+    // ============================================================
+
+    private void HexFillRhombus(Vector2Int a, Vector2Int b, string terrainId)
+    {
+        int q0 = Mathf.Clamp(Mathf.Min(a.x, b.x), 0, _mapWidth - 1);
+        int q1 = Mathf.Clamp(Mathf.Max(a.x, b.x), 0, _mapWidth - 1);
+        int r0 = Mathf.Clamp(Mathf.Min(a.y, b.y), 0, _mapHeight - 1);
+        int r1 = Mathf.Clamp(Mathf.Max(a.y, b.y), 0, _mapHeight - 1);
+
+        for (int q = q0; q <= q1; q++)
+        {
+            for (int r = r0; r <= r1; r++)
+            {
+                var pos = new Vector2Int(q, r);
+                RecordChange(pos);
+                _mapGrid[pos] = terrainId;
+            }
+        }
+    }
+
+    private void HexFloodFill(Vector2Int start, string fillTerrainId)
+    {
+        if (!_mapGrid.TryGetValue(start, out string targetId)) return;
+        if (targetId == fillTerrainId) return;
+
+        const int MAX_FILL = 100000;
+        var queue = new Queue<Vector2Int>();
+        var visited = new HashSet<Vector2Int>();
+        queue.Enqueue(start);
+        visited.Add(start);
+
+        while (queue.Count > 0)
+        {
+            if (visited.Count > MAX_FILL)
+            {
+                Debug.LogWarning($"六边形洪水填充已超过 {MAX_FILL} 格，中断操作");
+                break;
+            }
+
+            Vector2Int current = queue.Dequeue();
+            if (_mapGrid.TryGetValue(current, out string id) && id == targetId)
+            {
+                RecordChange(current);
+                _mapGrid[current] = fillTerrainId;
+
+                var neighbors = HexGridUtils.GetOffsetNeighborsInBounds(
+                    current, _mapWidth, _mapHeight, CurrentHexOrientation);
+                foreach (var neighbor in neighbors)
+                {
+                    if (visited.Add(neighbor))
+                        queue.Enqueue(neighbor);
+                }
+            }
+        }
+    }
+
+    internal void HexRangeFill(Vector2Int center, int range, string terrainId)
+    {
+        var cells = HexGridUtils.GetOffsetHexagonsInRange(
+            center, range, _mapWidth, _mapHeight, CurrentHexOrientation);
+        foreach (var c in cells)
+        {
+            RecordChange(c);
+            _mapGrid[c] = terrainId;
         }
     }
 
@@ -1231,6 +1743,12 @@ public class MapEditorWindow : EditorWindow
 
     internal void DoFloodFill(Vector2Int start, string fillTerrainId)
     {
+        if (IsHexMode)
+        {
+            HexFloodFill(start, fillTerrainId);
+            return;
+        }
+
         if (!_mapGrid.TryGetValue(start, out string targetId)) return;
         if (targetId == fillTerrainId) return;
 
@@ -1390,7 +1908,10 @@ public class MapEditorWindow : EditorWindow
             mapName = _mapName,
             mapWidth = _mapWidth,
             mapHeight = _mapHeight,
-            layerCount = _allLayers.Count
+            layerCount = _allLayers.Count,
+            cellSize = _cellSize,
+            gridShape = _gridShape == GridShape.Square ? "Square" : "Hex",
+            hexOrientation = _gridShape == GridShape.HexPointyTop ? "PointyTop" : "FlatTop"
         };
         // 遍历所有层：地形 → cellDatas, 单位 → unitDatas
         for (int layer = 0; layer < _allLayers.Count; layer++)
@@ -1433,12 +1954,27 @@ public class MapEditorWindow : EditorWindow
                 return;
         }
 
-        if (data.formatVersion != "1.0")
-            Debug.LogWarning($"[MapEditor] JSON 版本 {data.formatVersion}，期望 1.0");
+        // 网格形状匹配检查
+        string currentShape = _gridShape == GridShape.Square ? "Square" : "Hex";
+        string loadedShape = string.IsNullOrEmpty(data.gridShape) ? "Square" : data.gridShape;
+        if (currentShape != loadedShape)
+        {
+            bool proceed = EditorUtility.DisplayDialog(
+                "网格形状不匹配",
+                $"当前编辑器为 [{currentShape}] 网格，JSON 文件为 [{loadedShape}] 网格。\n" +
+                "加载后编辑器将自动切换到 JSON 的网格形状。是否继续？",
+                "确定", "取消");
+            if (!proceed) return;
+
+            _gridShape = loadedShape == "Hex"
+                ? (data.hexOrientation == "PointyTop" ? GridShape.HexPointyTop : GridShape.HexFlatTop)
+                : GridShape.Square;
+        }
 
         _mapName = data.mapName;
         _mapWidth = Mathf.Max(1, data.mapWidth);
         _mapHeight = Mathf.Max(1, data.mapHeight);
+        if (data.cellSize > 0) _cellSize = data.cellSize;
         _undoStack.Clear();
         _redoStack.Clear();
 
@@ -1528,6 +2064,9 @@ public class MapEditorWindow : EditorWindow
     internal int MapHeight => _mapHeight;
     internal float CellSize => _cellSize;
     internal int CurrentLayer => _currentLayer;
+    internal GridShape CurrentGridShape => _gridShape;
+    internal bool IsHexModeInternal => IsHexMode;
+    internal HexGridUtils.HexOrientation CurrentHexOrientationInternal => CurrentHexOrientation;
     internal List<Dictionary<Vector2Int, string>> AllLayers => _allLayers;
     internal EditMode CurrentEditMode => _editMode;
     internal string SelectedTerrainId => _config != null && _selectTerrainIndex < _config.terrainResources.Count ? _config.terrainResources[_selectTerrainIndex].terrainId : "";
@@ -1552,6 +2091,7 @@ public class MapEditorWindow : EditorWindow
 
     internal bool IsCurrentLayerTerrainInternal => IsCurrentLayerTerrain;
     internal Dictionary<Vector2Int, string> CurrentUnitGrid => _unitGrid;
+    internal int HexFillRange => _hexFillRange;
     internal string GetUnitNameById(string unitId)
     {
         foreach (var uc in _unitConfigs)

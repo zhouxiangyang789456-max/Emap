@@ -46,6 +46,27 @@ public class RuntimeTilemapGenerator : MonoBehaviour
             go.AddComponent<TilemapRenderer>();
         }
 
+        // 设置 Grid 布局
+        var grid = tilemap.GetComponentInParent<Grid>();
+        if (grid == null)
+        {
+            grid = tilemap.gameObject.AddComponent<Grid>();
+        }
+
+        if (_loadedData.IsHex)
+        {
+            grid.cellLayout = GridLayout.CellLayout.Hexagon;
+            float R = _loadedData.cellSize > 0 ? _loadedData.cellSize : 1f;
+            var orient = _loadedData.hexOrientation == "PointyTop"
+                ? HexGridUtils.HexOrientation.PointyTop
+                : HexGridUtils.HexOrientation.FlatTop;
+            grid.cellSize = HexGridUtils.GetUnityCellSize(R, orient);
+        }
+        else
+        {
+            grid.cellLayout = GridLayout.CellLayout.Rectangle;
+        }
+
         // 分批设置 Tile（避免单帧卡顿）
         int count = 0;
         foreach (var cell in _loadedData.cellDatas)

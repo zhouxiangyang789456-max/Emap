@@ -4,24 +4,31 @@ using System.Collections.Generic;
 [Serializable]
 public class MapJsonData
 {
-    public string formatVersion = "1.0";
+    public string formatVersion = "2.0";
     public string mapName;
     public int mapWidth;
     public int mapHeight;
     public int layerCount = 1;
+    public string gridShape = "Square";
+    public string hexOrientation = "FlatTop";
+    public float cellSize = 1.0f;
     public List<MapCellData> cellDatas = new List<MapCellData>();
     public List<MapUnitData> unitDatas = new List<MapUnitData>();
+
+    public bool IsHex => !string.IsNullOrEmpty(gridShape) && gridShape == "Hex";
 
     public List<string> Validate(MapResourceConfig config)
     {
         var errors = new List<string>();
         var seen = new HashSet<(int, int, int)>();
+        string coordLabel = IsHex ? "col" : "x";
+        string coordLabel2 = IsHex ? "row" : "y";
         for (int i = 0; i < cellDatas.Count; i++)
         {
             var c = cellDatas[i];
             if (c == null) { errors.Add($"cellDatas[{i}] 为 null"); continue; }
             if (c.x < 0 || c.x >= mapWidth || c.y < 0 || c.y >= mapHeight)
-                errors.Add($"格子 ({c.x},{c.y}) 超出地图范围 ({mapWidth}×{mapHeight})");
+                errors.Add($"格子 ({coordLabel}={c.x},{coordLabel2}={c.y}) 超出地图范围 ({mapWidth}×{mapHeight})");
             if (c.layer < 0 || c.layer >= layerCount)
                 errors.Add($"格子 ({c.x},{c.y}) 层级 {c.layer} 超出范围 (0~{layerCount - 1})");
             if (!string.IsNullOrEmpty(c.terrainId) && config != null && !config.ContainsId(c.terrainId))

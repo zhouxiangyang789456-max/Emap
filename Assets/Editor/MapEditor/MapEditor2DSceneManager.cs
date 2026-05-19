@@ -35,6 +35,44 @@ public class MapEditor2DSceneManager
     //  生命周期
     // ============================================================
 
+    /// <summary>同步 Grid 布局（cellSize 变更后旧场景对象不会自动更新，需主动调用）。</summary>
+    public void EnsureGridConfigured()
+    {
+        if (_grid == null) return;
+
+        bool isHex = _owner.IsHexModeInternal;
+        if (isHex)
+        {
+            Vector3 expected = HexGridUtils.GetUnityCellSize(
+                _owner.CellSize, _owner.CurrentHexOrientationInternal);
+            if (_grid.cellLayout != GridLayout.CellLayout.Hexagon
+                || (expected - _grid.cellSize).sqrMagnitude > 0.0001f)
+            {
+                _grid.cellLayout = GridLayout.CellLayout.Hexagon;
+                _grid.cellSize = expected;
+                SyncAllTiles();
+            }
+        }
+        else
+        {
+            float s = _owner.CellSize;
+            Vector3 expected = new Vector3(s, s, 1f);
+            if (_grid.cellLayout != GridLayout.CellLayout.Rectangle
+                || (expected - _grid.cellSize).sqrMagnitude > 0.0001f)
+            {
+                _grid.cellLayout = GridLayout.CellLayout.Rectangle;
+                _grid.cellSize = expected;
+                SyncAllTiles();
+            }
+        }
+    }
+
+    public void RebuildScene()
+    {
+        Cleanup();
+        Setup();
+    }
+
     public void Setup()
     {
         if (_containerGO != null) return;
@@ -42,14 +80,25 @@ public class MapEditor2DSceneManager
         var config = _owner.Config;
         if (config == null) return;
 
+        bool isHex = _owner.IsHexModeInternal;
+
         // 容器
         _containerGO = new GameObject("MapEditor2D");
         _containerGO.hideFlags = HideFlags.DontSave;
 
         // Grid
         _grid = _containerGO.AddComponent<Grid>();
-        _grid.cellLayout = GridLayout.CellLayout.Rectangle;
-        _grid.cellSize = new Vector3(_owner.CellSize, _owner.CellSize, 1f);
+        if (isHex)
+        {
+            _grid.cellLayout = GridLayout.CellLayout.Hexagon;
+            _grid.cellSize = HexGridUtils.GetUnityCellSize(
+                _owner.CellSize, _owner.CurrentHexOrientationInternal);
+        }
+        else
+        {
+            _grid.cellLayout = GridLayout.CellLayout.Rectangle;
+            _grid.cellSize = new Vector3(_owner.CellSize, _owner.CellSize, 1f);
+        }
 
         // Tilemap 子对象
         var tilemapGO = new GameObject("Tilemap_Layer");
@@ -75,18 +124,32 @@ public class MapEditor2DSceneManager
             sv.in2DMode = true;
             sv.orthographic = true;
 
-            float w = _owner.MapWidth * _owner.CellSize;
-            float h = _owner.MapHeight * _owner.CellSize;
-
-            // 俯视角：相机从正上方垂直向下看 XY 平面
-            sv.rotation = Quaternion.identity;
-            // 视口中心对准地图中心
-            sv.pivot = new Vector3(w * 0.5f, h * 0.5f, 0f);
-            // 自动计算 orthographic size 以完整显示地图（留 10% 边距）
-            float aspect = sv.camera != null ? sv.camera.aspect : 1.6f;
-            float vertSize = h * 0.55f;
-            float horzSize = (w * 0.55f) / aspect;
-            sv.size = Mathf.Max(vertSize, horzSize, 5f);
+            if (isHex)
+            {
+                var orient = _owner.CurrentHexOrientationInternal;
+                var bounds = HexGridUtils.GetMapBoundsWorld2D(
+                    _owner.MapWidth, _owner.MapHeight, _owner.CellSize, orient);
+                float bw = bounds.max.x - bounds.min.x;
+                float bh = bounds.max.y - bounds.min.y;
+                sv.rotation = Quaternion.identity;
+                sv.pivot = new Vector3((bounds.min.x + bounds.max.x) * 0.5f,
+                                       (bounds.min.y + bounds.max.y) * 0.5f, 0f);
+                float aspect = sv.camera != null ? sv.camera.aspect : 1.6f;
+                float vertSize = bh * 0.55f;
+                float horzSize = (bw * 0.55f) / aspect;
+                sv.size = Mathf.Max(vertSize, horzSize, 5f);
+            }
+            else
+            {
+                float w = _owner.MapWidth * _owner.CellSize;
+                float h = _owner.MapHeight * _owner.CellSize;
+                sv.rotation = Quaternion.identity;
+                sv.pivot = new Vector3(w * 0.5f, h * 0.5f, 0f);
+                float aspect = sv.camera != null ? sv.camera.aspect : 1.6f;
+                float vertSize = h * 0.55f;
+                float horzSize = (w * 0.55f) / aspect;
+                sv.size = Mathf.Max(vertSize, horzSize, 5f);
+            }
 
             sv.Repaint();
         }
@@ -229,12 +292,46 @@ public class MapEditor2DSceneManager
             for (int y = y0; y <= y1; y++)
             {
                 string tid = _owner.GetCellTerrain(x, y, layer);
+                var cell = new Vector3Int(x, y, layer);
                 if (string.IsNullOrEmpty(tid))
-                    _tilemap.SetTile(new Vector3Int(x, y, layer), null);
+                    _tilemap.SetTile(cell, null);
                 else if (_tileCache.TryGetValue(tid, out Tile tile))
-                    _tilemap.SetTile(new Vector3Int(x, y, layer), tile);
+                    _tilemap.SetTile(cell, tile);
             }
         }
+    }
+
+    // ============================================================
+    //  鼠标 → 世界坐标（与 Scene 摄像机对齐，避免透视下 Z=0 平面偏差）
+    // ============================================================
+
+    private bool TryGetMouseWorldOnGridPlane(SceneView sceneView, Event e, out Vector3 worldPos)
+    {
+        worldPos = Vector3.zero;
+        if (e == null || sceneView?.camera == null || _grid == null) return false;
+
+        Ray ray = HandleUtility.GUIPointToWorldRay(e.mousePosition);
+        Vector3 planePoint = _grid.transform.TransformPoint(Vector3.zero);
+        Plane plane = new Plane(-sceneView.camera.transform.forward, planePoint);
+        if (!plane.Raycast(ray, out float dist)) return false;
+
+        worldPos = ray.GetPoint(dist);
+        return true;
+    }
+
+    private bool TryGetOffsetCellAtMouse(SceneView sceneView, Event e, out Vector2Int offset, out Vector3 centerWorld)
+    {
+        offset = default;
+        centerWorld = default;
+        if (!TryGetMouseWorldOnGridPlane(sceneView, e, out Vector3 worldPos)) return false;
+
+        Vector3Int unityCell = _grid.WorldToCell(worldPos);
+        if (!HexGridUtils.IsInOffsetRect(unityCell.x, unityCell.y, _owner.MapWidth, _owner.MapHeight))
+            return false;
+
+        offset = new Vector2Int(unityCell.x, unityCell.y);
+        centerWorld = _grid.GetCellCenterWorld(new Vector3Int(offset.x, offset.y, 0));
+        return true;
     }
 
     // ============================================================
@@ -244,11 +341,12 @@ public class MapEditor2DSceneManager
     public void OnSceneGUI(SceneView sceneView)
     {
         if (_tilemap == null) return;
+        EnsureGridConfigured();
         DrawGridLines();
         DrawTerrainHighlights();
         DrawUnitMarkers();
-        DrawHoverPreview();
-        HandleMouseInput();
+        DrawHoverPreview(sceneView);
+        HandleMouseInput(sceneView);
     }
 
     // ============================================================
@@ -257,6 +355,12 @@ public class MapEditor2DSceneManager
 
     private void DrawGridLines()
     {
+        if (_owner.IsHexModeInternal)
+        {
+            DrawHexGridLines2D();
+            return;
+        }
+
         float camDist = 50f;
         if (SceneView.lastActiveSceneView?.camera != null)
         {
@@ -295,6 +399,36 @@ public class MapEditor2DSceneManager
         Handles.Label(origin + new Vector3(0.2f, 0.2f, 0), "原点 (0,0)");
     }
 
+    private void DrawHexGridLines2D()
+    {
+        if (_grid == null) return;
+
+        var orient = _owner.CurrentHexOrientationInternal;
+        int mw = _owner.MapWidth;
+        int mh = _owner.MapHeight;
+
+        Handles.color = new Color(0.2f, 0.8f, 0.2f, 0.3f);
+        for (int row = 0; row < mh; row++)
+        {
+            for (int col = 0; col < mw; col++)
+            {
+                Vector3 center = _grid.GetCellCenterWorld(new Vector3Int(col, row, 0));
+                Vector3[] corners = HexGridUtils.GetHexCorners2D(center, _grid, orient);
+                Vector3[] closed = new Vector3[7];
+                System.Array.Copy(corners, closed, 6);
+                closed[6] = corners[0];
+                Handles.DrawAAPolyLine(1.5f, closed);
+            }
+        }
+
+        // 原点标识
+        Handles.color = Color.cyan;
+        Vector3 origin = _grid.GetCellCenterWorld(Vector3Int.zero);
+        Handles.DrawLine(origin + Vector3.back * 0.1f, origin + Vector3.right * 0.5f + Vector3.back * 0.1f);
+        Handles.DrawLine(origin + Vector3.back * 0.1f, origin + Vector3.up * 0.5f + Vector3.back * 0.1f);
+        Handles.Label(origin + new Vector3(0.2f, 0.2f, -0.1f), "原点 (0,0)");
+    }
+
     // ============================================================
     //  地形高亮（非 Tilemap 的空格用灰色方块标识）
     // ============================================================
@@ -319,13 +453,16 @@ public class MapEditor2DSceneManager
         if (unitGrid.Count == 0) return;
 
         float cs = _owner.CellSize;
+        var orient = _owner.CurrentHexOrientationInternal;
         foreach (var kv in unitGrid)
         {
             Vector2Int cell = kv.Key;
             string uid = kv.Value;
             string name = _owner.GetUnitNameById(uid);
 
-            Vector3 center = new Vector3(cell.x * cs + cs * 0.5f, cell.y * cs + cs * 0.5f, -0.08f);
+            Vector3 center = _owner.IsHexModeInternal
+                ? HexGridUtils.OffsetToWorld2D(cell, cs, orient) + new Vector3(0, 0, -0.08f)
+                : new Vector3(cell.x * cs + cs * 0.5f, cell.y * cs + cs * 0.5f, -0.08f);
             Handles.color = new Color(0.3f, 0.5f, 1f, 0.6f);
             Handles.DrawSolidDisc(center, Vector3.forward, cs * 0.35f);
             Handles.color = Color.white;
@@ -337,16 +474,17 @@ public class MapEditor2DSceneManager
     //  悬停预览
     // ============================================================
 
-    private void DrawHoverPreview()
+    private void DrawHoverPreview(SceneView sceneView)
     {
+        if (_owner.IsHexModeInternal)
+        {
+            DrawHexHoverPreview2D(sceneView);
+            return;
+        }
+
         Event e = Event.current;
         if (e == null) return;
-
-        Ray ray = HandleUtility.GUIPointToWorldRay(e.mousePosition);
-        Plane plane = new Plane(new Vector3(0, 0, -1), Vector3.zero);
-        if (!plane.Raycast(ray, out float dist)) return;
-
-        Vector3 worldPos = ray.GetPoint(dist);
+        if (!TryGetMouseWorldOnGridPlane(sceneView, e, out Vector3 worldPos)) return;
         int cx = Mathf.FloorToInt(worldPos.x / _owner.CellSize);
         int cy = Mathf.FloorToInt(worldPos.y / _owner.CellSize);
         if (cx < 0 || cx >= _owner.MapWidth || cy < 0 || cy >= _owner.MapHeight) return;
@@ -397,6 +535,11 @@ public class MapEditor2DSceneManager
         }
 
         // Tooltip
+        DrawSquareTooltip2D(e, activeMode, cx, cy);
+    }
+
+    private void DrawSquareTooltip2D(Event e, MapEditorWindow.EditMode activeMode, int cx, int cy)
+    {
         Handles.BeginGUI();
         string tooltip;
         string cellTerrain = _owner.GetCellTerrain(cx, cy, _owner.CurrentLayer);
@@ -413,11 +556,48 @@ public class MapEditor2DSceneManager
                 ? $"Brush {terrain.terrainName} ({terrain.terrainId}) @ [{cx},{cy}]"
                 : $"无 [{cx},{cy}]";
         }
-        var style = new GUIStyle(GUI.skin.box)
-        {
-            fontSize = 12,
-            alignment = TextAnchor.MiddleLeft
-        };
+        var style = new GUIStyle(GUI.skin.box) { fontSize = 12, alignment = TextAnchor.MiddleLeft };
+        style.normal.textColor = Color.white;
+        var content = new GUIContent(tooltip);
+        Vector2 size = style.CalcSize(content);
+        GUI.Box(new Rect(e.mousePosition.x + 20, e.mousePosition.y - 10, size.x + 10, 22), content, style);
+        Handles.EndGUI();
+    }
+
+    private void DrawHexHoverPreview2D(SceneView sceneView)
+    {
+        Event e = Event.current;
+        if (e == null) return;
+        if (!TryGetOffsetCellAtMouse(sceneView, e, out Vector2Int cell, out Vector3 center)) return;
+
+        _hoveredCell = new Vector3Int(cell.x, cell.y, _owner.CurrentLayer);
+
+        var activeMode = e.shift ? MapEditorWindow.EditMode.Eraser : _owner.CurrentEditMode;
+        Color previewColor = activeMode == MapEditorWindow.EditMode.Eraser
+            ? Color.red
+            : Color.green;
+
+        float alpha = 0.3f;
+        center.z = -0.05f;
+
+        // 填充
+        Handles.color = new Color(previewColor.r, previewColor.g, previewColor.b, alpha);
+        Vector3[] corners = HexGridUtils.GetHexCorners2D(center, _grid, _owner.CurrentHexOrientationInternal);
+        Vector3[] closed = new Vector3[7];
+        System.Array.Copy(corners, closed, 6);
+        closed[6] = corners[0];
+        Handles.DrawAAConvexPolygon(closed);
+
+        // 边框
+        Handles.color = new Color(1f, 1f, 1f, 0.6f);
+        Handles.DrawAAPolyLine(2f, closed);
+
+        // Tooltip
+        Handles.BeginGUI();
+        string tooltip = activeMode == MapEditorWindow.EditMode.Eraser
+            ? $"Eraser [{cell.x},{cell.y}]"
+            : $"Brush [{cell.x},{cell.y}]";
+        var style = new GUIStyle(GUI.skin.box) { fontSize = 12, alignment = TextAnchor.MiddleLeft };
         style.normal.textColor = Color.white;
         var content = new GUIContent(tooltip);
         Vector2 size = style.CalcSize(content);
@@ -453,16 +633,17 @@ public class MapEditor2DSceneManager
     //  鼠标输入
     // ============================================================
 
-    private void HandleMouseInput()
+    private void HandleMouseInput(SceneView sceneView)
     {
+        if (_owner.IsHexModeInternal)
+        {
+            HandleHexMouseInput2D(sceneView);
+            return;
+        }
+
         Event e = Event.current;
         if (e == null) return;
-
-        Ray ray = HandleUtility.GUIPointToWorldRay(e.mousePosition);
-        Plane plane = new Plane(new Vector3(0, 0, -1), Vector3.zero);
-        if (!plane.Raycast(ray, out float dist)) return;
-
-        Vector3 worldPos = ray.GetPoint(dist);
+        if (!TryGetMouseWorldOnGridPlane(sceneView, e, out Vector3 worldPos)) return;
         int cx = Mathf.FloorToInt(worldPos.x / _owner.CellSize);
         int cy = Mathf.FloorToInt(worldPos.y / _owner.CellSize);
         if (cx < 0 || cx >= _owner.MapWidth || cy < 0 || cy >= _owner.MapHeight) return;
@@ -495,6 +676,75 @@ public class MapEditor2DSceneManager
                     e.Use();
                 }
                 break;
+        }
+    }
+
+    private void HandleHexMouseInput2D(SceneView sceneView)
+    {
+        Event e = Event.current;
+        if (e == null) return;
+        if (!TryGetOffsetCellAtMouse(sceneView, e, out Vector2Int cell, out _)) return;
+
+        Vector3Int tilePos = new Vector3Int(cell.x, cell.y, _owner.CurrentLayer);
+        var activeMode = e.shift ? MapEditorWindow.EditMode.Eraser : _owner.CurrentEditMode;
+
+        switch (activeMode)
+        {
+            case MapEditorWindow.EditMode.Brush:
+            case MapEditorWindow.EditMode.Eraser:
+                HandleHexBrushOrErase2D(e, tilePos, cell, activeMode);
+                break;
+            case MapEditorWindow.EditMode.RectangleFill:
+            case MapEditorWindow.EditMode.FloodFill:
+            case MapEditorWindow.EditMode.HexRangeFill:
+                if (e.type == EventType.MouseDown && e.button == 0)
+                {
+                    string fillId = _owner.SelectedTerrainId;
+                    if (!string.IsNullOrEmpty(fillId))
+                    {
+                        _owner.BeginUndoOp();
+                        if (activeMode == MapEditorWindow.EditMode.FloodFill)
+                            _owner.DoFloodFill(cell, fillId);
+                        else if (activeMode == MapEditorWindow.EditMode.HexRangeFill)
+                            _owner.HexRangeFill(cell, _owner.HexFillRange, fillId);
+                        _owner.EndUndoOp();
+                        SyncAllTiles();
+                        _owner.RepaintWindow();
+                    }
+                    e.Use();
+                }
+                break;
+        }
+    }
+
+    private void HandleHexBrushOrErase2D(Event e, Vector3Int tilePos, Vector2Int cell, MapEditorWindow.EditMode mode)
+    {
+        if (e.type == EventType.MouseDown && e.button == 0)
+        {
+            _isPainting = true;
+            _lastPaintedCell = tilePos;
+            _owner.BeginUndoOp();
+            PaintOneCell(cell, tilePos, mode);
+            _owner.EndUndoOp();
+            _owner.RepaintWindow();
+            e.Use();
+        }
+        else if (e.type == EventType.MouseDrag && e.button == 0 && _isPainting)
+        {
+            if (tilePos != _lastPaintedCell)
+            {
+                _lastPaintedCell = tilePos;
+                _owner.BeginUndoOp();
+                PaintOneCell(cell, tilePos, mode);
+                _owner.EndUndoOp();
+                _owner.RepaintWindow();
+            }
+            e.Use();
+        }
+        else if (e.type == EventType.MouseUp && e.button == 0)
+        {
+            _isPainting = false;
+            e.Use();
         }
     }
 
