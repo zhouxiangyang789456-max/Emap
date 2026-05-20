@@ -26,7 +26,7 @@
 
 ### 1. 导入
 
-将 `Assets/Editor/MapEditor`、`Assets/Scripts/Map`、`Assets/Scripts/Unit` 文件夹复制到你的 Unity 项目。
+将 `Assets/MapEditor` 文件夹复制到你的 Unity 项目（一次导入，含所有 Editor + Runtime 代码）。
 
 ### 2. 创建配置表
 
@@ -48,22 +48,22 @@ Project 窗口右键 → **Create → 地图编辑器 → 地形资源配置表*
 
 ```
 Assets/
-├── Editor/MapEditor/
-│   ├── MapEditorWindow.cs            # 编辑器主窗口（Tab、资源管理、3D渲染、鼠标输入）
-│   └── MapEditor2DSceneManager.cs    # 2D Tilemap 模式管理
-├── Editor/Tests/
-│   └── MapEditorTests.cs             # 单元测试
-├── Scripts/Map/
-│   ├── HexGridUtils.cs               # 六边形网格数学库（偏移坐标）
-│   ├── MapJsonData.cs                # JSON 数据模型
-│   ├── MapPathfinding.cs             # A* 寻路（方形+六边形）
-│   ├── MapResourceConfig.cs          # 资源配置表 + TerrainResource
-│   ├── GameMapGlobal.cs              # 全局地图查询
-│   ├── RuntimeMapGenerator.cs        # 运行时地图生成（GameObject）
-│   └── RuntimeTilemapGenerator.cs    # 运行时地图生成（Tilemap）
-└── Scripts/Unit/
-    ├── UnitConfig.cs                 # 单位配置（已弃用，用标签="单位"替代）
-    └── UnitTerrainLogic.cs           # 单位-地形碰撞逻辑
+└── MapEditor/                        # ← 只需导入这一个文件夹
+    ├── Editor/
+    │   ├── MapEditorWindow.cs        # 编辑器主窗口
+    │   ├── MapEditor2DSceneManager.cs # 2D Tilemap 模式
+    │   └── Tests/
+    │       └── MapEditorTests.cs     # 单元测试
+    └── Runtime/
+        ├── HexGridUtils.cs           # 六边形网格数学库
+        ├── MapJsonData.cs            # JSON 数据模型
+        ├── MapPathfinding.cs         # A* 寻路（方形+六边形）
+        ├── MapResourceConfig.cs      # 资源配置表 + TerrainResource
+        ├── GameMapGlobal.cs          # 全局地图查询
+        ├── RuntimeMapGenerator.cs    # 运行时地图生成
+        ├── RuntimeTilemapGenerator.cs # 运行时 Tilemap 生成
+        ├── UnitConfig.cs             # 单位配置 [已弃用]
+        └── UnitTerrainLogic.cs       # 单位碰撞逻辑
 ```
 
 ## 页签说明
